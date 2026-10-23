@@ -14,7 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--port", default="COM4", help="Serial port (default: COM4)")
     parser.add_argument(
-        "--baudrate", type=int, default=4_500_000, help="Bus baudrate (default: 4500000)"
+        "--baudrate", type=int, default=3000000, help="Bus baudrate (default: 3000000)"
     )
     parser.add_argument(
         "--mode",
