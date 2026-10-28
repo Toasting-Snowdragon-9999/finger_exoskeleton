@@ -22,6 +22,10 @@ system in the TCU.
 
 NOT VERIFIED ON HARDWARE. Tested against source/mock_tcu.py, which implements
 the same documented subset. See README for what to check on the real system.
+
+
+https://github.com/Jakubach/pytrigno/blob/master/pytrigno.py
+
 """
 
 import socket
@@ -32,7 +36,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from .config import ChannelConfig, TrignoConfig
-from .sensor import EMGBlock, EMGSource, SourceConnectionError, SourceError, SourceTimeoutError
+from .emg_source import (
+    EMGBlock,
+    EMGSource,
+    SourceConnectionError,
+    SourceError,
+    SourceTimeoutError,
+)
 
 LEGACY_EMG_PORT = 50041
 

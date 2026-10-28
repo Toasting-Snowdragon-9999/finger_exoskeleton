@@ -10,8 +10,8 @@ from scipy.signal import butter, sosfilt, sosfilt_zi
 from source.config import ProcessingConfig
 from source.import_data import EMGData
 from source.process_signal import SignalProcess
-from source.sensor import EMGBlock
-from source.streaming import MovingRMS, StreamingFilter, StreamingProcessor
+from source.emg_source import EMGBlock
+from source.streaming import MovingRMS, StreamingFilter, StreamingProcessor, dominant_frequency
 
 FS = 2000.0
 
@@ -126,6 +126,45 @@ def test_tremor_ratio_separates_rhythmic_from_random() -> None:
     assert np.median(out.tremor_amplitude[0, int(3 * FS) :]) > 5 * np.median(
         out.tremor_amplitude[1, int(3 * FS) :]
     )
+
+
+def test_tremor_depth_is_independent_of_effort() -> None:
+    """Without tremor the depth stays low at any effort; 5 Hz bursting raises it."""
+    rng = np.random.default_rng(5)
+    t = np.arange(int(8 * FS)) / FS
+    noise = rng.standard_normal((3, t.size))
+    bursting = 0.5 * (1 + np.sin(2 * np.pi * 5 * t))
+    signal = np.vstack([noise[0] * 0.05, noise[1] * 0.5, noise[2] * 0.5 * bursting])
+    processor = StreamingProcessor(ProcessingConfig(slow_window_s=0.2), 3, FS)
+    out = processor.process(EMGBlock(signal, 0, 0.0))
+    settled = slice(int(3 * FS), None)
+    amplitude = np.median(out.tremor_amplitude[:, settled], axis=1)
+    depth = np.median(out.tremor_depth[:, settled], axis=1)
+    assert amplitude[1] > 5 * amplitude[0]  # the amplitude grows with effort ...
+    assert depth[0] < 0.15 and depth[1] < 0.15  # ... the depth does not
+    assert depth[2] > 2 * max(depth[0], depth[1])
+
+
+def test_tremor_depth_uses_envelope_floor_at_rest() -> None:
+    """A silent channel gives depth 0, not a division by zero."""
+    out = make_processor().process(EMGBlock(np.zeros((2, int(FS))), 0, 0.0))
+    assert np.all(out.tremor_depth == 0.0)
+
+
+@pytest.mark.parametrize("frequency", [3.0, 5.0, 7.0])
+def test_dominant_frequency_finds_the_modulation(frequency: float) -> None:
+    """The peak of a 2 s modulated envelope is found to within 0.1 Hz."""
+    rng = np.random.default_rng(6)
+    t = np.arange(int(2 * FS)) / FS
+    envelope = 1.0 + 0.5 * np.sin(2 * np.pi * frequency * t) + 0.05 * rng.standard_normal(t.size)
+    found = dominant_frequency(envelope[None, :], FS, (1.0, 9.0))
+    assert found[0] == pytest.approx(frequency, abs=0.1)
+
+
+def test_dominant_frequency_unknown_when_short_or_flat() -> None:
+    """Too little data or a flat signal gives NaN."""
+    assert np.isnan(dominant_frequency(np.ones((1, 100)), FS, (1.0, 9.0))[0])
+    assert np.isnan(dominant_frequency(np.ones((2, int(2 * FS))), FS, (1.0, 9.0))).all()
 
 
 def test_rejects_band_above_nyquist() -> None:

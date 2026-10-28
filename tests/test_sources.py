@@ -8,14 +8,8 @@ import pytest
 from conftest import offline_synthetic
 
 from source.config import AppConfig, RecordedConfig
-from source.sensor import (
-    CALIBRATION_SCENARIO,
-    EMGBlock,
-    RecordedSource,
-    Segment,
-    SourceConnectionError,
-    SyntheticSource,
-)
+from source.emg_source import EMGBlock, SourceConnectionError
+from source.sensor_mock import CALIBRATION_SCENARIO, RecordedSource, Segment, SyntheticSource
 
 
 def read(source: SyntheticSource | RecordedSource, seconds: float) -> list[EMGBlock]:

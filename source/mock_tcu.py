@@ -34,7 +34,7 @@ class MockSensor:
     position: int
     paired: bool = True
     active: bool = True
-    units: str = "Volts"
+    units: str = "V"  # TCU 3.6.0 reply (the SDK appendix example shows "Volts")
     sensor_type: str = "O"  # SDK section 7: Trigno Avanti sensor = type "O"
 
 
@@ -54,7 +54,7 @@ class MockTCUSettings:  # pylint: disable=too-many-instance-attributes
         int, ...
     ] = ()  # if set, frames are sent in chunks of these sizes (cycled)
     max_frames: int | None = None
-    start_index_base: int = 0  # what STARTINDEX? adds to the 0-based position
+    start_index_base: int = 1  # what STARTINDEX? adds to the 0-based position (TCU 3.6.0: 1)
     banner: str = "Mock Trigno SDK server (documented protocol subset)"
 
 

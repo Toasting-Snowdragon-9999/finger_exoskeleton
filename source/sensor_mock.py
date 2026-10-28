@@ -1,105 +1,23 @@
 """
-EMG sources. Every source (synthetic, recorded, live Delsys Trigno in
-source/trigno.py) has the same interface, EMGSource, and delivers EMGBlock
-objects, so the downstream pipeline cannot tell them apart.
+EMG sources without hardware: SyntheticSource (generated EMG) and
+RecordedSource (replay of a recorded CSV). Both implement the EMGSource
+interface from emg_source.py, like the real TrignoSource in trigno.py.
 
 Units: all sources deliver samples in mV.
 """
 
 import threading
 import time
-from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from types import TracebackType
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import butter, sosfilt
 
 from .config import ChannelConfig, RecordedConfig, SyntheticConfig
+from .emg_source import EMGBlock, EMGSource, SourceConnectionError
 from .import_data import load_columns, resolve_data_file
-
-
-@dataclass(frozen=True)
-class EMGBlock:
-    """
-    A block of consecutive samples from all channels.
-
-    samples:            shape (n_channels, n_samples), in mV
-    first_sample_index: index of samples[:, 0] since the source started; gaps
-                        in the index mean samples were lost
-    receive_time:       time.monotonic() when the block was received
-    """
-
-    samples: NDArray[np.float64]
-    first_sample_index: int
-    receive_time: float
-
-    @property
-    def n_samples(self) -> int:
-        """Number of samples per channel."""
-        return int(self.samples.shape[1])
-
-
-class SourceError(RuntimeError):
-    """Base class for acquisition errors."""
-
-
-class SourceConnectionError(SourceError):
-    """The source could not connect, or the connection was lost."""
-
-
-class SourceTimeoutError(SourceError):
-    """No data arrived within the timeout. The connection may still be alive."""
-
-
-class EMGSource(ABC):
-    """Interface shared by all EMG sources."""
-
-    kind = "abstract"
-
-    def __init__(self, channel_names: Sequence[str], sample_rate: float) -> None:
-        self.channel_names: tuple[str, ...] = tuple(channel_names)
-        self.sample_rate: float = sample_rate
-        self.connected: bool = False
-
-    @property
-    def n_channels(self) -> int:
-        """Number of EMG channels delivered."""
-        return len(self.channel_names)
-
-    @abstractmethod
-    def start(self) -> None:
-        """Connect and start streaming. Raises SourceConnectionError on failure."""
-
-    @abstractmethod
-    def read_block(self) -> EMGBlock | None:
-        """
-        Block until the next EMGBlock is available. Returns None when a finite
-        source has no more data. Raises SourceTimeoutError or
-        SourceConnectionError.
-        """
-
-    @abstractmethod
-    def stop(self) -> None:
-        """Stop streaming and release all connections. Safe to call twice."""
-
-    def info(self) -> dict[str, str]:
-        """Human-readable facts about the source, for the monitor."""
-        return {"source": self.kind, "sample rate": f"{self.sample_rate:g} Hz"}
-
-    def __enter__(self) -> "EMGSource":
-        self.start()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        self.stop()
 
 
 class _Pacer:
@@ -145,14 +63,14 @@ class Segment:
     tremor: float = 0.0
 
 
-# Calibration part (played once). Matches [synthetic.calibration] in the config.
+# Intro (played once): rest, then a reference contraction.
 CALIBRATION_SCENARIO: tuple[Segment, ...] = (
     Segment(3.0, "rest (baseline calibration)"),
     Segment(2.0, "reference contraction", flexor=0.6, extensor=0.6),
     Segment(2.0, "rest"),
 )
 
-# Repeating part: exercises every controller path.
+# Repeating part: grasp, tremor and extension in different combinations.
 CYCLE_SCENARIO: tuple[Segment, ...] = (
     Segment(2.0, "rest"),
     Segment(4.0, "grasp", flexor=0.45, extensor=0.1),
@@ -171,8 +89,8 @@ class SyntheticSource(EMGSource):
     Generates multi-channel surface EMG: band-limited (20-450 Hz) Gaussian
     noise whose amplitude follows a scripted scenario of rest, voluntary
     contractions of different strength and tremor-like 4-6 Hz bursting.
-    Each channel has independent noise. Supports fault injection for testing
-    the safety behavior.
+    Each channel has independent noise. Supports fault injection (disconnection,
+    data dropout) for testing.
     """
 
     kind = "synthetic"

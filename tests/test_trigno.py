@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from source.config import AppConfig, ChannelConfig, TrignoConfig
 from source.mock_tcu import MockSensor, MockTCU, MockTCUSettings
-from source.sensor import EMGBlock, SourceConnectionError, SourceTimeoutError
+from source.emg_source import EMGBlock, SourceConnectionError, SourceTimeoutError
 from source.trigno import (
     TrignoConfigurationError,
     TrignoProtocolError,
@@ -184,7 +184,7 @@ def test_start_index_equal_to_slot_triggers_warning(channels: tuple[ChannelConfi
         sensors=[MockSensor(slot=s, position=s - 1) for s in range(1, 5)], start_index_base=1
     )
     with MockTCU(mock_settings, encoded_signal) as tcu:
-        source = TrignoSource(trigno_config(tcu), channels)
+        source = TrignoSource(trigno_config(tcu, start_index_base=0), channels)
         source.start()
         source.stop()
     assert any("start_index_base" in warning for warning in source.warnings)
