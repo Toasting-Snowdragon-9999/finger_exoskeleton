@@ -1,13 +1,14 @@
 """
 The configuration blueprint: setting types, defaults and validation for live
-EMG acquisition. The values in use are in applied_config.py; validate_config()
-rejects inconsistent combinations.
+EMG acquisition and the controller. The values in use are in applied_config.py;
+validate_config() rejects inconsistent combinations.
 """
 
 from dataclasses import dataclass
 
 CHANNEL_ROLES = ("flexor", "extensor", "other")
 SOURCE_KINDS = ("synthetic", "recorded", "trigno")
+TREMOR_MEASURES = ("depth", "level")
 
 
 class ConfigError(ValueError):
@@ -86,6 +87,47 @@ class ProcessingConfig:
 
 
 @dataclass(frozen=True)
+class CalibrationConfig:
+    """
+    Rest baseline and reference contraction windows, in seconds of stream time
+    from the start (or from the last recalibration). The reference is a
+    submaximal "firm grip" (RVC), not a maximum contraction.
+    """
+
+    baseline_window_s: tuple[float, float] = (0.5, 3.0)
+    reference_window_s: tuple[float, float] = (3.5, 6.5)
+    reference_percentile: float = 95.0
+    min_reference_ratio: float = 3.0
+
+
+@dataclass(frozen=True)
+class ControllerConfig:  # pylint: disable=too-many-instance-attributes
+    """
+    State machine thresholds and stiffness shaping. Grasp activation is
+    normalized (0 = rest, 1 = reference grip). tremor_measure picks what the
+    tremor thresholds apply to: "depth" (tremor amplitude / slow envelope,
+    independent of effort) or "level" (tremor amplitude / reference span).
+    """
+
+    grasp_on_threshold: float = 0.25
+    grasp_off_threshold: float = 0.15
+    grasp_on_time_s: float = 0.10
+    grasp_off_time_s: float = 0.30
+    tremor_measure: str = "depth"
+    tremor_on_threshold: float = 0.15
+    tremor_off_threshold: float = 0.08
+    tremor_min_ratio: float = 0.8
+    tremor_off_ratio: float = 0.6
+    tremor_on_time_s: float = 0.05
+    tremor_off_time_s: float = 0.75
+    engage_stiffness: float = 0.3
+    stiffness_gain: float = 2.0
+    max_stiffness: float = 1.0
+    engage_rate_per_s: float = 20.0
+    release_rate_per_s: float = 1.5
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Live view and reconnection."""
 
@@ -95,7 +137,7 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
-class AppConfig:
+class AppConfig:  # pylint: disable=too-many-instance-attributes
     """The complete configuration."""
 
     channels: tuple[ChannelConfig, ...]
@@ -104,6 +146,8 @@ class AppConfig:
     synthetic: SyntheticConfig
     processing: ProcessingConfig
     runtime: RuntimeConfig
+    calibration: CalibrationConfig = CalibrationConfig()
+    controller: ControllerConfig = ControllerConfig()
 
     @property
     def channel_names(self) -> tuple[str, ...]:
@@ -123,6 +167,17 @@ def _check(condition: bool, message: str) -> None:
 
 def validate_config(config: AppConfig) -> None:
     """Reject inconsistent configurations."""
+    _validate_channels(config)
+    _validate_processing(config)
+    _validate_calibration(config.calibration)
+    _validate_controller(config.controller)
+
+    _check(config.runtime.monitor_seconds > 0, "monitor_seconds must be positive")
+    _check(config.runtime.max_reconnect_attempts >= 0, "max_reconnect_attempts must be >= 0")
+    _check(config.runtime.reconnect_delay_s >= 0, "reconnect_delay_s must be >= 0")
+
+
+def _validate_channels(config: AppConfig) -> None:
     names = config.channel_names
     _check(len(names) > 0, "At least one [[channels]] entry is required")
     _check(len(set(names)) == len(names), "Channel names must be unique")
@@ -144,6 +199,8 @@ def validate_config(config: AppConfig) -> None:
 
     _check(config.trigno.start_index_base in (0, 1), "trigno.start_index_base must be 0 or 1")
 
+
+def _validate_processing(config: AppConfig) -> None:
     processing = config.processing
     _check(
         0 < processing.bandpass_low_hz < processing.bandpass_high_hz,
@@ -172,6 +229,50 @@ def validate_config(config: AppConfig) -> None:
         "frequency_window_s must be positive and at most runtime.monitor_seconds",
     )
 
-    _check(config.runtime.monitor_seconds > 0, "monitor_seconds must be positive")
-    _check(config.runtime.max_reconnect_attempts >= 0, "max_reconnect_attempts must be >= 0")
-    _check(config.runtime.reconnect_delay_s >= 0, "reconnect_delay_s must be >= 0")
+
+def _validate_calibration(calibration: CalibrationConfig) -> None:
+    for window in (calibration.baseline_window_s, calibration.reference_window_s):
+        _check(
+            len(window) == 2 and 0 <= window[0] < window[1],
+            "Calibration windows must be (start, end) with 0 <= start < end",
+        )
+    _check(
+        calibration.baseline_window_s[1] <= calibration.reference_window_s[0],
+        "The baseline window must end before the reference window starts",
+    )
+    _check(
+        0 < calibration.reference_percentile <= 100,
+        "reference_percentile must be in (0, 100]",
+    )
+    _check(calibration.min_reference_ratio > 1, "min_reference_ratio must be above 1")
+
+
+def _validate_controller(controller: ControllerConfig) -> None:
+    _check(
+        controller.tremor_measure in TREMOR_MEASURES,
+        f"controller.tremor_measure must be one of {TREMOR_MEASURES}",
+    )
+    _check(
+        controller.grasp_off_threshold < controller.grasp_on_threshold,
+        "grasp_off_threshold must be below grasp_on_threshold (hysteresis)",
+    )
+    _check(
+        controller.tremor_off_threshold < controller.tremor_on_threshold,
+        "tremor_off_threshold must be below tremor_on_threshold (hysteresis)",
+    )
+    _check(0 <= controller.tremor_min_ratio <= 1.0, "tremor_min_ratio must be in [0, 1]")
+    _check(
+        controller.tremor_off_ratio <= controller.tremor_min_ratio,
+        "tremor_off_ratio must not exceed tremor_min_ratio (hysteresis)",
+    )
+    _check(0 < controller.max_stiffness <= 1.0, "max_stiffness must be in (0, 1]")
+    _check(
+        0 <= controller.engage_stiffness <= controller.max_stiffness,
+        "engage_stiffness must be within [0, max_stiffness]",
+    )
+    _check(
+        controller.engage_rate_per_s > 0 and controller.release_rate_per_s > 0,
+        "Stiffness rate limits must be positive",
+    )
+    for name in ("grasp_on_time_s", "grasp_off_time_s", "tremor_on_time_s", "tremor_off_time_s"):
+        _check(getattr(controller, name) >= 0, f"controller.{name} must be >= 0")

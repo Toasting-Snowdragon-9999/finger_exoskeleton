@@ -47,10 +47,25 @@ APB in slots 1-4).
 The live window shows one plot per channel: the filtered EMG (20-450 Hz band-pass + 50 Hz
 notch) with its 200 ms RMS envelope, and a status panel with the connection, the
 reported and measured sample rate, the current RMS per channel and counters (blocks,
-missing samples, reconnections). Keys: `r` raw/filtered, `space` pause, `q` quit.
+missing samples, reconnections). Keys: `r` raw/filtered, `c` recalibrate, `space` pause, `q` quit.
 
 `--save` writes a CSV with a header row, then `time_s` and one column per channel in mV
 (the raw samples, exactly as received).
+
+### The controller panel (control signal)
+
+Every mode also runs the controller and shows its output in the bottom panel and in the
+status text: **grasp activation** (0 = rest, 1 = reference grip), the **tremor depth** the
+controller watches, and the **stiffness** command 0-1, which is the control signal. Nothing
+physical is driven. The panel title shows the state (`DISARMED`, `IDLE`, `GRASP_ARMED`,
+`STIFFENED`) and the last transition; the dashed lines are the on-thresholds.
+
+The controller needs a calibration at the start of every run (the windows are per source
+in `CALIBRATION` in `applied_config.py`; for Trigno: rest from 0.5 to 2.5 s, then hold a
+firm grip from 3.5 to 6.5 s). It arms itself when the calibration succeeds and stays
+`DISARMED` with a message if it fails. Press `c` to repeat the calibration at any time.
+Thresholds and stiffness shaping are in `CONTROLLER` in `applied_config.py`; with
+`--source synthetic` the panel shows the whole cycle (grasp, grasp + tremor, release).
 
 ### Saving measurements
 
@@ -168,6 +183,9 @@ source/
   trigno.py                  TrignoSource: Delsys Trigno Control Utility TCP/IP client
   mock_tcu.py                Mock TCU server for tests and demos (not hardware)
   streaming.py               Causal, stateful multi-channel filtering and envelopes
+  activation.py              Calibration (rest + reference grip) and normalized activation
+  controller.py              State machine DISARMED/IDLE/GRASP_ARMED/STIFFENED -> stiffness
+  control_stage.py           Runs calibration, activation and controller per block
   acquisition.py             Acquisition thread, ring buffers, CSV recording
   session.py                 Measurement session folders (emg.csv + session.json)
   calibration.py             Amplitude calibration (placeholder, not used yet)
@@ -179,7 +197,8 @@ tests/                       pytest suite (sources, mock TCU, filters, acquisiti
 ```
 
 Data flow: EMG source → acquisition thread (filtering, gap detection, optional CSV
-recording) → ring buffers holding the last 5 s → live viewer.
+recording, then calibration → activation → controller) → ring buffers holding the last
+5 s → live viewer.
 
 ## How the project works
 _To be written._

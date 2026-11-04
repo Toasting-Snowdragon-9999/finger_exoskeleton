@@ -7,7 +7,9 @@ from collections.abc import Sequence
 
 from source.config import (
     AppConfig,
+    CalibrationConfig,
     ChannelConfig,
+    ControllerConfig,
     ProcessingConfig,
     RecordedConfig,
     RuntimeConfig,
@@ -17,8 +19,9 @@ from source.config import (
 )
 
 # EMG channels. Each channel has a name, a role and where to find it:
-#   role             "flexor", "extensor" or "other"; only the synthetic source uses
-#                    it (flexors and extensors get different simulated activity).
+#   role             "flexor", "extensor" or "other". Flexor channels drive grasp
+#                    detection (all channels when no flexor is configured); the
+#                    synthetic source gives flexors and extensors different activity.
 #   trigno_slot      TCU sensor slot (1-16) the sensor is paired to.
 #   recorded_column  Column index in the recorded CSV. The dataset (source/import_data.py)
 #                    has 0 = ECU, 1 = FCU, 2 = ECR, 3 = FCR, recorded from these forearm
@@ -101,6 +104,50 @@ PROCESSING = ProcessingConfig(
     frequency_window_s=2.0,  # dominant frequency of the fast envelope over this window
 )
 
+# Calibration windows in seconds of stream time from the start: rest during the
+# baseline window, make the reference grip (firm, not maximal) during the
+# reference window. One entry per source; the synthetic scenario and the dataset
+# have fixed timelines, the Trigno windows are what the user follows live.
+CALIBRATION = {
+    "trigno": CalibrationConfig(
+        baseline_window_s=(0.5, 3.0),
+        reference_window_s=(3.5, 6.5),
+        reference_percentile=95.0,  # PROVISIONAL: of the slow envelope in the reference window
+        min_reference_ratio=3.0,  # PROVISIONAL: the reference must exceed rest this many times
+    ),
+    # Synthetic scenario (sensor_mock.py): rest 0-3 s, reference contraction 3-5 s.
+    "synthetic": CalibrationConfig(baseline_window_s=(0.5, 2.5), reference_window_s=(3.3, 4.7)),
+    # Dataset timeline (paper Fig. 4): rest 0-4 s, then gestures until 104 s.
+    "recorded": CalibrationConfig(baseline_window_s=(0.5, 3.5), reference_window_s=(4.0, 104.0)),
+}
+
+# Controller (design doc 8.1 option C and 8.4): IDLE -> GRASP_ARMED -> STIFFENED.
+# Grasp activation is normalized: 0 = rest baseline, 1 = reference grip. The
+# tremor thresholds apply to the tremor depth (~0.05 without tremor at any effort,
+# ~0.3 or more with tremor), or to the tremor level with tremor_measure="level".
+# The stiffness (0 = released, 1 = maximum) is the control signal; the viewer
+# shows it, nothing physical is driven. All values PROVISIONAL.
+CONTROLLER = ControllerConfig(
+    grasp_on_threshold=0.25,
+    grasp_off_threshold=0.15,  # hysteresis: must be < on
+    grasp_on_time_s=0.10,
+    grasp_off_time_s=0.30,
+    tremor_measure="depth",
+    tremor_on_threshold=0.15,
+    tremor_off_threshold=0.08,  # hysteresis: must be < on
+    # Engage only when the tremor-band fluctuation is rhythmic: ~1 for a narrow
+    # 4-6 Hz peak, ~0.5 for broadband voluntary fluctuation. 0 disables the gate.
+    tremor_min_ratio=0.8,
+    tremor_off_ratio=0.6,  # release when the ratio stays below this; 0 = amplitude only
+    tremor_on_time_s=0.05,  # design doc 8.4: engage within tens of ms
+    tremor_off_time_s=0.75,  # design doc 8.4: release over 0.5-1 s
+    engage_stiffness=0.3,  # stiffness when tremor is first detected
+    stiffness_gain=2.0,  # extra stiffness per unit tremor above the off threshold
+    max_stiffness=1.0,  # command ceiling, at most 1.0
+    engage_rate_per_s=20.0,  # max increase of the command per second
+    release_rate_per_s=1.5,  # max decrease per second (~0.7 s from 1 to 0)
+)
+
 # Live view and reconnection.
 RUNTIME = RuntimeConfig(
     monitor_seconds=5.0,  # seconds of EMG shown in the live view
@@ -109,8 +156,15 @@ RUNTIME = RuntimeConfig(
 )
 
 
-def build_config(channels: Sequence[ChannelConfig] | None = None) -> AppConfig:
-    """The settings above as one validated configuration (CHANNELS unless given)."""
+def build_config(
+    channels: Sequence[ChannelConfig] | None = None, source: str = "synthetic"
+) -> AppConfig:
+    """
+    The settings above as one validated configuration: CHANNELS unless given,
+    and the calibration windows of `source` (synthetic, recorded or trigno).
+    """
+    if source not in CALIBRATION:
+        raise ValueError(f"Unknown source {source!r}; expected one of {tuple(CALIBRATION)}")
     config = AppConfig(
         channels=tuple(CHANNELS if channels is None else channels),
         trigno=TRIGNO,
@@ -118,6 +172,8 @@ def build_config(channels: Sequence[ChannelConfig] | None = None) -> AppConfig:
         synthetic=SYNTHETIC,
         processing=PROCESSING,
         runtime=RUNTIME,
+        calibration=CALIBRATION[source],
+        controller=CONTROLLER,
     )
     validate_config(config)
     return config

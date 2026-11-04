@@ -11,6 +11,9 @@ Examples:
   python run_emg.py --source recorded --file 10_raw.csv
   python run_emg.py --source recorded --file measurements/20261023-140512_trigno_grip  (replay)
   python run_emg.py --source trigno --headless --duration 30 (status lines, no window)
+
+Every mode runs the controller (calibration -> activation -> state machine) and
+shows its stiffness command, the control signal. Nothing physical is driven.
 """
 
 import argparse
@@ -133,9 +136,20 @@ def with_recording(args: argparse.Namespace, config: AppConfig) -> AppConfig:
             file=str(recording.emg_path.resolve()),
             sample_rate_hz=recording.sample_rate_hz,
         ),
+        # Our sessions start with the live calibration routine, not the dataset timeline
+        calibration=applied_config.CALIBRATION["trigno"],
     )
     validate_config(config)
     return config
+
+
+def calibration_instructions(config: AppConfig) -> str:
+    """What the user must do at the start for the controller to calibrate."""
+    rest, grip = config.calibration.baseline_window_s, config.calibration.reference_window_s
+    return (
+        f"Calibration: rest from {rest[0]:g} to {rest[1]:g} s, then hold a firm grip from "
+        f"{grip[0]:g} to {grip[1]:g} s. The controller arms when it succeeds; press 'c' to repeat."
+    )
 
 
 def open_session(args: argparse.Namespace, config: AppConfig) -> SessionLog | None:
@@ -196,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point; returns the process exit code."""
     args = parse_args(argv)
     try:
-        config = with_recording(args, applied_config.build_config())
+        config = with_recording(args, applied_config.build_config(source=args.source))
     except (ConfigError, RecordingError) as error:
         replay = isinstance(error, RecordingError)
         print(f"{'Cannot replay' if replay else 'Configuration error'}: {error}", file=sys.stderr)
@@ -220,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Cannot create the recording {save_path}: {error}", file=sys.stderr)
         return EXIT_CONFIG
     print(f"Streaming {source.kind} EMG at {source.sample_rate:g} Hz")
+    print(calibration_instructions(config))
     if session is not None:
         print(f"Recording session {session.directory}")
 

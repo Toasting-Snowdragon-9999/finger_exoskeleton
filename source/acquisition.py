@@ -2,12 +2,16 @@
 Live EMG acquisition:
 
   EMG source -> acquisition thread -> StreamingProcessor -> ring buffers -> viewer
+                                   |                    \\-> ControlStage -> control ring buffer
                                    \\-> optional CSV recording of the raw samples
 
 - One thread reads blocks from the source, filters them (causal, see
   streaming.py) and appends the raw EMG, filtered EMG, slow and fast envelopes,
   tremor amplitude, ratio and depth to ring buffers holding the last
   runtime.monitor_seconds.
+- Every block then goes through the control stage (control_stage.py):
+  calibration, normalized activation and the controller. Its grasp activation,
+  tremor measure and stiffness command (the control signal) are buffered too.
 - snapshot() also reports the dominant frequency of each fast envelope over
   the last processing.frequency_window_s.
 - The viewer (viewer.py) copies those buffers with snapshot().
@@ -23,13 +27,15 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .config import AppConfig
+from .control_stage import ControlStage
+from .controller import ControllerState
 from .emg_source import (
     EMGBlock,
     EMGSource,
@@ -43,6 +49,7 @@ FloatArray = NDArray[np.float64]
 RATE_WINDOW_BLOCKS = 150  # blocks used for the measured sample rate (~2 s of 13.5 ms frames)
 FLUSH_PERIOD_S = 1.0  # the recording is flushed to disk at least this often
 MAX_EVENTS = 10000  # messages kept for the session log (the viewer shows the last 8)
+CONTROL_BUFFER_DIVISOR = 4  # control history capacity: monitor_seconds * sample_rate / this
 
 
 class RingBuffer:
@@ -123,6 +130,12 @@ class ViewerSnapshot:  # pylint: disable=too-many-instance-attributes
     tremor_depth   tremor / slow envelope: ~0.05 without tremor at any effort, higher with tremor
     dominant_hz    per channel: peak frequency of the fast envelope's fluctuation within
                    processing.rhythm_band_hz over the last frequency_window_s (NaN if unknown)
+
+    The control history has one entry per block, (n,):
+    control_time   stream time of the controller tick, s
+    grasp          grasp activation (0 = rest, 1 = reference grip)
+    tremor_control the tremor measure the controller thresholds apply to (tremor_measure)
+    stiffness      the control signal: commanded stiffness 0 (released) to 1
     """
 
     channel_names: tuple[str, ...]
@@ -143,10 +156,22 @@ class ViewerSnapshot:  # pylint: disable=too-many-instance-attributes
     source_info: dict[str, str]
     messages: tuple[str, ...]
     recording: str | None
+    control_time: FloatArray = field(default_factory=lambda: np.zeros(0))
+    grasp: FloatArray = field(default_factory=lambda: np.zeros(0))
+    tremor_control: FloatArray = field(default_factory=lambda: np.zeros(0))
+    stiffness: FloatArray = field(default_factory=lambda: np.zeros(0))
+    state: str = ControllerState.DISARMED.value
+    armed: bool = False
+    last_transition: str = ""
+    calibration_phase: str = ""
+    calibration_seconds_left: float = 0.0
+    calibration_error: str | None = None
+    tremor_measure: str = "depth"
+    thresholds: dict[str, float] = field(default_factory=dict)
 
 
 class StreamCore:  # pylint: disable=too-many-instance-attributes
-    """Filtering, buffering, gap detection and recording, one block at a time."""
+    """Filtering, buffering, gap detection, recording and control, one block at a time."""
 
     def __init__(
         self, config: AppConfig, sample_rate: float, recorder: EMGRecorder | None = None
@@ -158,6 +183,7 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
         self.recorder = recorder
         n_channels = len(config.channel_names)
         self.processor = StreamingProcessor(config.processing, n_channels, sample_rate)
+        self.control = ControlStage(config, sample_rate, self.message)
         capacity = max(2, int(config.runtime.monitor_seconds * sample_rate))
         self._time = RingBuffer(1, capacity)
         self._raw = RingBuffer(n_channels, capacity)
@@ -167,6 +193,8 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
         self._tremor = RingBuffer(n_channels, capacity)
         self._tremor_ratio = RingBuffer(n_channels, capacity)
         self._tremor_depth = RingBuffer(n_channels, capacity)
+        # time, grasp, tremor measure, stiffness; one entry per block
+        self._control = RingBuffer(4, max(2, capacity // CONTROL_BUFFER_DIVISOR))
         self._arrivals: deque[tuple[float, int]] = deque(maxlen=RATE_WINDOW_BLOCKS)
         self._samples_received = 0
         self._expected_index: int | None = None
@@ -200,7 +228,7 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
         self.message("New acquisition session: filters reset")
 
     def handle_block(self, block: EMGBlock) -> None:
-        """Record, check, filter and buffer one block from the source."""
+        """Record, check, filter, buffer and control on one block from the source."""
         if self.recorder is not None:
             self.recorder.write(block)
         if not np.all(np.isfinite(block.samples)):
@@ -233,6 +261,19 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
             self._arrivals.append((block.receive_time, self._samples_received))
             self._counters["blocks"] = self._counters.get("blocks", 0) + 1
 
+        output = self.control.step(processed)
+        activation = self.control.activation
+        grasp = activation.grasp_activation if activation is not None else 0.0
+        tremor = (
+            activation.tremor_measure(self.control.tremor_measure)
+            if activation is not None
+            else 0.0
+        )
+        with self._lock:
+            self._control.write(
+                np.array([[float(times[-1])], [grasp], [tremor], [output.stiffness]])
+            )
+
     def _measured_rate(self) -> float:
         """Samples per second of wall-clock time over the recent blocks (call under the lock)."""
         if len(self._arrivals) < 2:
@@ -245,8 +286,11 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
     def snapshot(self, source: EMGSource, connected: bool, running: bool) -> ViewerSnapshot:
         """Copy everything the viewer shows."""
         source_info = source.info()
+        control = self.control
+        output = control.last_output
         with self._lock:
             fast_envelope = self._fast_envelope.read()
+            history = self._control.read()
             snapshot = ViewerSnapshot(
                 channel_names=self.config.channel_names,
                 sample_rate=self.sample_rate,
@@ -266,6 +310,18 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
                 source_info=source_info,
                 messages=tuple(self._messages),
                 recording=str(self.recorder.path) if self.recorder is not None else None,
+                control_time=history[0],
+                grasp=history[1],
+                tremor_control=history[2],
+                stiffness=history[3],
+                state=output.state.value if output else control.controller.state.value,
+                armed=output.armed if output else False,
+                last_transition=control.controller.last_transition,
+                calibration_phase=control.calibrator.phase,
+                calibration_seconds_left=control.calibrator.seconds_left,
+                calibration_error=control.calibrator.error,
+                tremor_measure=control.tremor_measure,
+                thresholds=control.thresholds,
             )
         # The spectrum runs outside the lock so acquisition is never held up by the viewer
         processing = self.config.processing
@@ -343,6 +399,11 @@ class Acquisition:
         """Viewer data."""
         assert self.core is not None
         return self.core.snapshot(self.source, self._connected, self.running)
+
+    def recalibrate(self) -> None:
+        """Restart the calibration from the next block (the controller disarms meanwhile)."""
+        if self.core is not None:
+            self.core.control.request_recalibration()
 
     def _loop(self) -> None:
         assert self.core is not None
