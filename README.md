@@ -173,8 +173,9 @@ drives the tendon motor through the EMG position controllers in `source/controll
   `signal_timeout_s` (source lost).
 - On exit (window closed, `q`, Ctrl+C) the finger returns to open before anything else stops.
 - A motor or bus error stops motor control (shown in the event log); EMG acquisition goes on.
-- Calibration arms the controller at the end of the reference grip, so if the grip is still
-  held the finger closes briefly right after calibration.
+- After calibration the controller arms only once the hand has relaxed (grasp activation at
+  most `grasp_off_threshold` for `grasp_off_time_s`; the viewer shows "relax to arm"), so a
+  reference grip that is still held does not close the finger.
 - The stiffness command is not sent to the motor yet.
 
 ## Testing

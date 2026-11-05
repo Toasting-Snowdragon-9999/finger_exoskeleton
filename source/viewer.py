@@ -81,8 +81,8 @@ def calibration_text(snapshot: ViewerSnapshot) -> str:
     """One line on the calibration: what to do now, or the error."""
     if snapshot.calibration_error:
         return f"FAILED: {snapshot.calibration_error}"
-    if snapshot.calibration_phase == "done":
-        return "done"
+    if snapshot.calibration_phase in ("done", "relax to arm"):
+        return snapshot.calibration_phase
     return f"{snapshot.calibration_phase} ({snapshot.calibration_seconds_left:.0f} s left)"
 
 

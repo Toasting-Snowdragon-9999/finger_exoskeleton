@@ -93,7 +93,8 @@ def test_rest_tremor_without_grasp_does_not_stiffen(config: AppConfig) -> None:
 
 
 def test_recalibration_disarms_and_calibrates_again(config: AppConfig) -> None:
-    """A recalibration request takes effect on the next block; the controller re-arms after."""
+    """A recalibration request takes effect on the next block; the controller re-arms after
+    the hand relaxes."""
     source = offline_synthetic(config)
     source.start()
     core = StreamCore(config, RATE)
@@ -105,10 +106,48 @@ def test_recalibration_disarms_and_calibrates_again(config: AppConfig) -> None:
     assert core.control.controller.state == ControllerState.DISARMED
     assert core.snapshot(source, True, True).calibration_phase == "rest (baseline)"
     # From 6.5 s: the baseline window falls in rest (7-9 s) and the reference window
-    # (9.8-11.2 s) in the synthetic grasp, which serves as the reference contraction
+    # (9.8-11.2 s) in the synthetic grasp, which serves as the reference contraction.
+    # The grasp goes on until 21 s, so the controller only arms after that.
     run_until(core, source, 11.5)
     assert core.control.calibrated
+    assert core.control.controller.state == ControllerState.DISARMED
+    assert core.control.phase == "relax to arm"
+    run_until(core, source, 22.0)
+    assert source.segment_at(22.0).label == "rest"
     assert core.control.controller.state != ControllerState.DISARMED
+    assert core.control.phase == "done"
+
+
+def test_controller_arms_only_after_the_reference_grip_is_released(config: AppConfig) -> None:
+    """
+    Calibration ends at 4.7 s while the synthetic reference grip lasts until 5 s: the
+    controller stays disarmed until the hand has relaxed for grasp_off_time_s.
+    """
+    source = offline_synthetic(config)
+    source.start()
+    core = StreamCore(config, RATE)
+    states = []
+    while True:
+        block = source.read_block()
+        assert block is not None
+        core.handle_block(block)
+        stream_time = (block.first_sample_index + block.n_samples) / RATE
+        if core.control.calibrated:
+            states.append((stream_time, core.control.controller.state, core.control.phase))
+        if stream_time >= 7.0:
+            break
+
+    calibrated_at = states[0][0]
+    assert calibrated_at < 5.0 and source.segment_at(calibrated_at).label == "reference contraction"
+    # Never in a grasp state, and disarmed ("relax to arm") until the grip is released
+    assert all(state in (ControllerState.DISARMED, ControllerState.IDLE) for _, state, _ in states)
+    armed_at = next(t for t, state, _ in states if state != ControllerState.DISARMED)
+    assert armed_at >= 5.0 + config.controller.grasp_off_time_s
+    assert all(phase == "relax to arm" for t, _, phase in states if t < armed_at)
+    assert core.control.phase == "done"
+    texts = [text for _, text in core.event_log()]
+    assert "Calibration complete; relax the hand to arm the controller" in texts
+    assert "Hand relaxed; controller armed" in texts
 
 
 def test_failed_calibration_is_reported_once(config: AppConfig) -> None:

@@ -8,10 +8,13 @@ and the controller, driven one processed block at a time by StreamCore
 
 Calibration starts with the first block: the user rests during the baseline
 window and makes the reference grip during the reference window
-(CalibrationConfig). When it succeeds the controller is armed automatically,
-because nothing physical is driven: the stiffness is only displayed. A failed
-calibration leaves the controller disarmed; request_recalibration() (key 'c'
-in the viewer) starts over from the next block.
+(CalibrationConfig). When it succeeds the controller is armed automatically
+as soon as the hand has relaxed: grasp activation at most grasp_off_threshold
+for grasp_off_time_s (ControllerConfig). Until then it stays disarmed (phase
+"relax to arm"), so a reference grip that is still held when calibration ends
+does not count as a grasp; with run_emg.py --motor the finger stays open. A
+failed calibration leaves the controller disarmed; request_recalibration()
+(key 'c' in the viewer) starts over from the next block.
 
 The controller is timed in stream time (sample index / sample rate), so a
 replayed recording gives the same result as the live run it came from.
@@ -42,11 +45,18 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
         self.last_output: ControllerOutput | None = None
         self._reported_error: str | None = None
         self._recalibrate = threading.Event()
+        self._arm_pending = False  # calibrated, waiting for the hand to relax
+        self._relaxed_since: float | None = None
 
     @property
     def calibrated(self) -> bool:
         """True when activation can be estimated."""
         return self.estimator is not None
+
+    @property
+    def phase(self) -> str:
+        """What the user should be doing: the calibration phase, or "relax to arm"."""
+        return "relax to arm" if self._arm_pending else self.calibrator.phase
 
     @property
     def tremor_measure(self) -> str:
@@ -72,6 +82,8 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
     def _restart_calibration(self) -> None:
         self.controller.disarm("recalibration")
         self.estimator = None
+        self._arm_pending = False
+        self._relaxed_since = None
         self.activation = None
         self._reported_error = None
         self.calibrator.restart()
@@ -90,11 +102,26 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
         if self.estimator is None:
             self.calibrator.update(processed)
             self._finish_calibration()
+        stream_time = (processed.first_sample_index + processed.n_samples) / self.sample_rate
         if self.estimator is not None:
             self.activation = self.estimator.estimate(processed)
-        stream_time = (processed.first_sample_index + processed.n_samples) / self.sample_rate
+            if self._arm_pending:
+                self._arm_when_relaxed(self.activation, stream_time)
         self.last_output = self.controller.update(self.activation, (), stream_time)
         return self.last_output
+
+    def _arm_when_relaxed(self, activation: ActivationEstimate, now: float) -> None:
+        """Arm once the grasp activation has stayed at rest for grasp_off_time_s."""
+        controller = self.config.controller
+        if activation.grasp_activation > controller.grasp_off_threshold:
+            self._relaxed_since = None
+            return
+        if self._relaxed_since is None:
+            self._relaxed_since = now
+        if now - self._relaxed_since >= controller.grasp_off_time_s:
+            self._arm_pending = False
+            self.controller.arm()
+            self._message("Hand relaxed; controller armed")
 
     def _finish_calibration(self) -> None:
         calibrator = self.calibrator
@@ -102,8 +129,9 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
             self.estimator = ActivationEstimator(
                 calibrator.result, self.config.channel_roles, self.tremor_measure
             )
-            self.controller.arm()
-            self._message("Calibration complete; controller armed")
+            self._arm_pending = True
+            self._relaxed_since = None
+            self._message("Calibration complete; relax the hand to arm the controller")
             levels = " ".join(
                 f"{name} {rest * 1000:.0f}/{ref * 1000:.0f}"
                 for name, rest, ref in zip(
