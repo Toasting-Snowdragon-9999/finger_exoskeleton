@@ -68,14 +68,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Motor position (ticks) with the finger open (default: position at start)",
     )
     emg.add_argument("--max-speed", type=float, default=600.0, help="Max ticks/s (default: 600)")
-    emg.add_argument("--rate", type=float, default=50.0, help="Control loop rate in Hz (default: 50)")
+    emg.add_argument(
+        "--rate", type=float, default=50.0, help="Control loop rate in Hz (default: 50)"
+    )
     emg.add_argument(
         "--emg-sim",
         action="store_true",
         help="Drive the controller with a simulated activation signal (bench test)",
     )
-    emg.add_argument("--deadband", type=float, default=0.1, help="[proportional] rest deadband 0..1")
-    emg.add_argument("--gamma", type=float, default=1.0, help="[proportional] response curve exponent")
+    emg.add_argument(
+        "--deadband", type=float, default=0.1, help="[proportional] rest deadband 0..1"
+    )
+    emg.add_argument(
+        "--gamma", type=float, default=1.0, help="[proportional] response curve exponent"
+    )
     emg.add_argument("--on-threshold", type=float, default=0.5, help="[threshold] close above this")
     emg.add_argument("--off-threshold", type=float, default=0.3, help="[threshold] open below this")
     emg.add_argument(
