@@ -1,17 +1,31 @@
-"""Command-line entry point for direct Dynamixel motor control."""
+"""Command-line entry point for direct Dynamixel motor control and EMG control."""
 
 import argparse
 import time
 from collections.abc import Sequence
 
 from source.DynamixelHardwareInterface import Motors
-from source.controllers import TendonTensionController
+from source.controllers import ProportionalEMGController, ThresholdEMGController
+
+
+def simulated_activation(t: float, period_s: float = 8.0) -> float:
+    """Bench-test stand-in for the EMG activation (0..1): rest, ramp up, hold, ramp down."""
+    p = (t % period_s) / period_s * 8.0
+    if p < 2:
+        return 0.0
+    if p < 3:
+        return p - 2
+    if p < 5:
+        return 1.0
+    if p < 6:
+        return 6 - p
+    return 0.0
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser."""
     parser = argparse.ArgumentParser(
-        description="Connect to the Dynamixel motor and optionally send one command."
+        description="Connect to the Dynamixel motor; send one command or run an EMG controller."
     )
     parser.add_argument("--port", default="COM4", help="Serial port (default: COM4)")
     parser.add_argument(
@@ -37,40 +51,70 @@ def build_parser() -> argparse.ArgumentParser:
         "--hold",
         type=float,
         default=0.0,
-        help="Keep torque enabled for this many seconds after sending a command",
+        help="Keep torque enabled for this many seconds after sending a command "
+        "(with --controller: run time in seconds, 0 = until Ctrl+C)",
     )
-    parser.add_argument(
-        "--tension",
-        type=float,
-        help="Run the tendon take-up controller with this peak pull current in mA "
-        "(keep it LOW: just enough to reel in slack). Forces current mode; "
-        "runs for --hold seconds, or until Ctrl+C",
+
+    emg = parser.add_argument_group("EMG controllers (forces position mode)")
+    emg.add_argument(
+        "--controller",
+        choices=("proportional", "threshold"),
+        help="Run an EMG controller instead of sending a single command",
     )
-    parser.add_argument(
-        "--assist",
-        type=float,
-        default=0.0,
-        help="Optional pay-out assist in mA while the user pulls the tendon out "
-        "(cancels gearbox friction; default: 0 = off)",
-    )
-    parser.add_argument(
-        "--probe-period",
-        type=float,
-        default=1.0,
-        help="Seconds between slack checks while idle; 0 = never re-check (default: 1.0)",
-    )
-    parser.add_argument(
-        "--wind-direction",
+    emg.add_argument("--closed-pos", type=int, help="Motor position (ticks) with the grasp closed")
+    emg.add_argument(
+        "--open-pos",
         type=int,
-        choices=(1, -1),
-        default=1,
-        help="Sign of current that reels the tendon in (default: 1)",
+        help="Motor position (ticks) with the finger open (default: position at start)",
+    )
+    emg.add_argument("--max-speed", type=float, default=600.0, help="Max ticks/s (default: 600)")
+    emg.add_argument("--rate", type=float, default=50.0, help="Control loop rate in Hz (default: 50)")
+    emg.add_argument(
+        "--emg-sim",
+        action="store_true",
+        help="Drive the controller with a simulated activation signal (bench test)",
+    )
+    emg.add_argument("--deadband", type=float, default=0.1, help="[proportional] rest deadband 0..1")
+    emg.add_argument("--gamma", type=float, default=1.0, help="[proportional] response curve exponent")
+    emg.add_argument("--on-threshold", type=float, default=0.5, help="[threshold] close above this")
+    emg.add_argument("--off-threshold", type=float, default=0.3, help="[threshold] open below this")
+    emg.add_argument(
+        "--toggle", action="store_true", help="[threshold] each contraction toggles open/closed"
     )
     return parser
 
 
+def run_emg_controller(args, motors, motor_id) -> None:
+    if args.closed_pos is None:
+        raise SystemExit("--closed-pos is required with --controller")
+    if not args.emg_sim:
+        raise SystemExit(
+            "No EMG source connected here: the activation signal comes from the EMG "
+            "pipeline. Use --emg-sim for a bench test, or call controller.step(activation) / "
+            "controller.run(get_activation) from the EMG code."
+        )
+    open_pos = args.open_pos if args.open_pos is not None else motors.get_position(motor_id)
+
+    common = dict(open_pos=open_pos, closed_pos=args.closed_pos,
+                  max_speed=args.max_speed, rate_hz=args.rate)
+    if args.controller == "proportional":
+        controller = ProportionalEMGController(
+            motors, motor_id, deadband=args.deadband, gamma=args.gamma, **common)
+    else:
+        controller = ThresholdEMGController(
+            motors, motor_id,
+            on_threshold=args.on_threshold, off_threshold=args.off_threshold,
+            mode="toggle" if args.toggle else "hold", **common)
+
+    t0 = time.perf_counter()
+    print(f"{args.controller} controller: open={open_pos}, closed={args.closed_pos}. "
+          "Ctrl+C to stop (the finger returns to open).")
+    controller.run(lambda: simulated_activation(time.perf_counter() - t0),
+                   duration=args.hold if args.hold > 0 else None)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Connect to the motor, show feedback, and optionally send a command."""
+    """Connect to the motor, show feedback, and optionally send a command / run EMG control."""
     args = build_parser().parse_args(argv)
     motors = Motors(port=args.port, baudrate=args.baudrate)
 
@@ -84,22 +128,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         # The Dynamixel control table requires torque to be disabled while
         # changing the operating mode.
         motors.disable_torque()
-        motors.set_cont_mode("cur" if args.tension is not None else args.mode)
+        motors.set_cont_mode("pos" if args.controller else args.mode)
         motors.enable_torque()
 
         print(f"Motor {motor_id} position: {motors.get_position(motor_id)}")
-        if args.tension is not None:
-            controller = TendonTensionController(
-                motors,
-                motor_id,
-                tension_ma=args.tension,
-                wind_direction=args.wind_direction,
-                assist_ma=args.assist,
-                probe_period_s=args.probe_period if args.probe_period > 0 else None,
-                rate_hz=20,
-            )
-            print(f"Taking up tendon slack (peak {args.tension} mA). Ctrl+C to stop.")
-            controller.run(duration=args.hold if args.hold > 0 else None)
+        if args.controller:
+            run_emg_controller(args, motors, motor_id)
             return 0
         if args.command is not None:
             motors.sendMotorCommand(motor_id, args.command)

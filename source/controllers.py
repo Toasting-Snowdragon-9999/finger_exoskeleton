@@ -1,203 +1,233 @@
 """
 This module contains the different control systems implemented for the finger exoskeleton.
+
+Two controllers drive the Dynamixel in POSITION mode between an "open" and a
+"closed" (grasp) motor position, based on a muscle activation signal that is
+supplied from outside (the EMG processing is NOT part of this module):
+
+  * ProportionalEMGController - the finger position follows the muscle
+    activation continuously (more effort = more closed).
+  * ThresholdEMGController    - activation above a threshold closes the hand,
+    below a lower threshold opens it (with hysteresis and dwell times,
+    optionally as a toggle).
+
+INPUT CONTRACT
+    activation: a float in 0.0 .. 1.0 where 0 = muscle at rest and 1 = full
+    effort. It should already be rectified, smoothed (envelope) and
+    normalised per user. Values outside 0..1 are clipped, NaN is treated as
+    "no signal".
+
+USAGE
+    controller = ProportionalEMGController(motors, motor_id, open_pos, closed_pos)
+
+    # (a) call once per new activation value from your own loop
+    controller.step(activation)
+
+    # (b) or let the controller run its own fixed-rate loop, polling a callable
+    controller.run(get_activation)      # get_activation() -> float or None
 """
 
+import math
 import time
 
 import numpy as np
 
 
-# Controller to maintain tension in the tendon at all times
-class TendonTensionController:
-    """Takes up tendon slack, then lets go. It never holds a position.
+# --------------------------------------------------------------------------- #
+# Controllers
+# --------------------------------------------------------------------------- #
+class EMGPositionController:
+    """Common machinery: EMG -> activation -> target position -> safe motor command.
 
-    The motor must be in current control mode. There is no tension sensor, so
-    the controller works with a small state machine based on motor velocity:
-
-      REEL  Ramp a small pull current up (ramp_s) in the wind-in direction.
-            While the tendon is slack the motor spins and reels it in. When
-            the tendon goes taut the motor stalls (velocity ~ 0 for stall_s)
-            -> go to IDLE. If the user pulls the tendon out while reeling,
-            the tendon is obviously taut -> go to IDLE as well.
-
-      IDLE  Command 0 A. The motor applies no pull, so the finger can rest
-            in ANY position and nothing is forced back to a set point. The
-            gearbox friction keeps the spool where it is, so the tendon stays
-            taut. If the user pulls the tendon out (finger extends) an
-            optional assist can cancel gearbox friction so movement is free.
-
-    Without a sensor, slack that appears while IDLE (the user flexes the
-    finger) cannot be seen directly. So every probe_period_s the controller
-    runs a short REEL: if the tendon is taut the motor stalls almost
-    immediately and goes back to IDLE; if it is slack, it reels it in first.
-    Set probe_period_s=None to disable re-probing (only the first take-up).
-
-    IMPORTANT: tension_ma must be LOW (just above the gearbox friction).
-    A taut tendon stalls the motor, but a high current would then pull the
-    finger into flexion. Find the lowest current that still reels in slack.
+    The motor must be in POSITION control mode. Positions are raw Dynamixel
+    ticks (position mode covers one turn, 0..4095 on the XM430/XL430).
 
     Parameters
     ----------
-    motors          : Motors instance (DynamixelHardwareInterface)
-    motor_id        : ID of the tendon motor
-    tension_ma      : peak pull current in mA during REEL (keep as low as works)
-    wind_direction  : +1 or -1, the sign of current/velocity that reels the tendon IN
-    probe_period_s  : seconds between slack checks while IDLE (None = never)
-    ramp_s          : seconds to ramp the pull from 0 to tension_ma in REEL
-    stall_s         : seconds of ~zero velocity (after the ramp) that means "taut"
-    stall_velocity  : rad/s below which the motor counts as not moving
-    max_reel_s      : safety timeout for one REEL; gives up and goes IDLE
-    damping         : mA removed from the pull per rad/s of reel-in speed
-    assist_ma       : optional pay-out assist in IDLE while the user pulls the
-                      tendon out (cancels gearbox friction). Default 0 = off.
-                      Keep it below the friction level or the motor will
-                      unspool the tendon on its own.
-    payout_threshold: rad/s of pay-out speed that counts as "user is pulling"
-    assist_taper    : rad/s of pay-out speed at which assist has faded to zero
-    release_s       : seconds assist stays on after the last pay-out motion
-    wind_limit_ticks: optional (min_pos, max_pos) in raw ticks; pull is cut
-                      when the position leaves this window in the wind-in direction
-    rate_hz         : control loop rate
+    motors, motor_id : Motors instance and the ID of the tendon motor
+    open_pos         : motor position with the finger open / tendon relaxed (ticks)
+    closed_pos       : motor position with the grasp closed (ticks)
+    max_speed        : limit on how fast the commanded position may move (ticks/s)
+    rate_hz          : loop rate used by run()
+    signal_timeout_s : run() only: if the signal source gives no valid value for
+                       this long, activation is forced to 0 so the finger opens
     """
 
-    CUR_UNIT_MA = 2.69  # 1 raw current unit = 2.69 mA (same constant as Motors)
-    REEL = "REEL"
-    IDLE = "IDLE"
-
-    def __init__(self, motors, motor_id, tension_ma=30.0, wind_direction=1,
-                 probe_period_s=1.0, ramp_s=0.3, stall_s=0.15, stall_velocity=0.03,
-                 max_reel_s=5.0, damping=20.0, assist_ma=0.0, payout_threshold=0.05,
-                 assist_taper=2.0, release_s=0.15, wind_limit_ticks=None, rate_hz=100.0):
+    def __init__(self, motors, motor_id, open_pos, closed_pos,
+                 max_speed=600.0, rate_hz=50.0, signal_timeout_s=0.5):
         assert motor_id in motors.motor_ids, f"Motor ID {motor_id} not found."
-        assert wind_direction in (1, -1), "wind_direction must be +1 or -1"
-        assert motors.control_mode[motors.motor_ids.index(motor_id)] == motors.CUR_CONTROL, \
-            "TendonTensionController requires the motor to be in current control mode."
+        assert motors.control_mode[motors.motor_ids.index(motor_id)] == motors.POS_CONTROL, \
+            "EMG controllers require the motor to be in position control mode."
+        assert open_pos != closed_pos, "open_pos and closed_pos must differ."
 
         self.motors = motors
         self.motor_id = motor_id
-        self.idx = motors.motor_ids.index(motor_id)
-        self.wind_direction = wind_direction
-        self.probe_period_s = probe_period_s
-        self.ramp_s = ramp_s
-        self.stall_s = stall_s
-        self.stall_velocity = stall_velocity
-        self.max_reel_s = max_reel_s
-        self.damping_raw = damping / self.CUR_UNIT_MA   # raw units per rad/s
-        self.payout_threshold = payout_threshold
-        self.assist_taper = assist_taper
-        self.release_s = release_s
-        self.wind_limit_ticks = wind_limit_ticks
+        self.open_pos = float(open_pos)
+        self.closed_pos = float(closed_pos)
+        self.lo = min(self.open_pos, self.closed_pos)
+        self.hi = max(self.open_pos, self.closed_pos)
+        self.max_speed = max_speed
         self.period = 1.0 / rate_hz
-        self.max_raw = float(motors.maxCur[self.idx])    # current limit read from the motor
+        self.signal_timeout_s = signal_timeout_s
 
-        self.tension_raw = 0.0
-        self.assist_raw = 0.0
-        self.set_tension_ma(tension_ma)
-        self.set_assist_ma(assist_ma)
-
-        self.state = self.REEL
-        self._state_t0 = None
-        self._last_motion = None
-        self._next_probe = None
-        self._assist_until = 0.0
+        self.target = self.open_pos          # where the controller wants to go
+        self.command = None                  # what was last sent (rate limited)
+        self._t_last = None
         self._stop = False
 
-    def set_tension_ma(self, tension_ma):
-        """Change the peak pull current (mA). Can be called while running."""
-        self.tension_raw = float(np.clip(tension_ma / self.CUR_UNIT_MA, 0.0, self.max_raw))
+    # -- to be implemented by the concrete controllers ------------------------
+    def compute_target(self, activation, now):
+        """Return the desired motor position in ticks for this activation (0..1)."""
+        raise NotImplementedError
 
-    def set_assist_ma(self, assist_ma):
-        """Change the pay-out assist current (mA). Can be called while running."""
-        self.assist_raw = float(np.clip(assist_ma / self.CUR_UNIT_MA, 0.0, self.max_raw))
+    # -------------------------------------------------------------------------
+    def _limit(self, target, now):
+        """Move the commanded position toward target at no more than max_speed."""
+        dt = self.period if self._t_last is None else max(now - self._t_last, 1e-3)
+        self._t_last = now
+        step = self.max_speed * dt
+        self.command += float(np.clip(target - self.command, -step, step))
+        self.command = float(np.clip(self.command, self.lo, self.hi))
+        return int(round(self.command))
 
-    def request_reel(self, now=None):
-        """Start a take-up (e.g. call this after a release in a grasp controller)."""
-        self._enter_reel(time.perf_counter() if now is None else now)
-
-    def _enter_reel(self, now):
-        self.state = self.REEL
-        self._state_t0 = now
-        self._last_motion = now
-
-    def _enter_idle(self, now):
-        self.state = self.IDLE
-        self._next_probe = None if self.probe_period_s is None else now + self.probe_period_s
-
-    def compute_command(self, velocity, position=None, now=None):
-        """Raw current command from the measured velocity (rad/s) and position (ticks)."""
-        if now is None:
-            now = time.perf_counter()
-        if self._state_t0 is None:                       # first call: start with a take-up
-            self._enter_reel(now)
-
-        v_in = self.wind_direction * velocity            # > 0: tendon being reeled in
-        magnitude = 0.0
-
-        # User pulling the tendon out: it is taut. Stop reeling, optionally assist.
-        if v_in < -self.payout_threshold:
-            self._assist_until = now + self.release_s
-            if self.state == self.REEL:
-                self._enter_idle(now)
-        elif v_in > self.payout_threshold:
-            self._assist_until = 0.0
-
-        if self.state == self.IDLE and self._next_probe is not None and now >= self._next_probe \
-                and now >= self._assist_until:
-            self._enter_reel(now)                        # periodic slack check
-
-        if now < self._assist_until:
-            taper = max(0.0, 1.0 - max(-v_in, 0.0) / self.assist_taper)
-            magnitude = -self.assist_raw * taper         # negative = pay-out direction
-        elif self.state == self.REEL:
-            t = now - self._state_t0
-            ramp = 1.0 if self.ramp_s <= 0 else min(t / self.ramp_s, 1.0)
-            magnitude = max(self.tension_raw * ramp - self.damping_raw * max(v_in, 0.0), 0.0)
-
-            if abs(velocity) > self.stall_velocity:
-                self._last_motion = now
-            stalled = t >= self.ramp_s and (now - self._last_motion) >= self.stall_s
-            timed_out = t > self.max_reel_s
-            wound_too_far = False
-            if self.wind_limit_ticks is not None and position is not None:
-                lo, hi = self.wind_limit_ticks
-                wound_too_far = position > hi if self.wind_direction > 0 else position < lo
-            if stalled or timed_out or wound_too_far:
-                self._enter_idle(now)                    # tendon taut: let go
-                magnitude = 0.0
-
-        magnitude = float(np.clip(magnitude, -self.max_raw, self.max_raw))
-        return int(round(self.wind_direction * magnitude))
-
-    def step(self):
-        """One control iteration: read feedback, compute, send. Returns the raw command."""
-        velocity = self.motors.get_velocity(self.motor_id)
-        position = self.motors.get_position(self.motor_id)
-        command = self.compute_command(velocity, position)
+    def step(self, activation, now=None):
+        """One control iteration for a new activation value (0..1).
+        Returns (activation, target, command)."""
+        now = time.perf_counter() if now is None else now
+        if self.command is None:             # start from where the motor is: no jump
+            self.command = float(np.clip(self.motors.get_position(self.motor_id), self.lo, self.hi))
+        activation = 0.0 if activation is None or math.isnan(activation) \
+            else float(np.clip(activation, 0.0, 1.0))
+        self.target = float(np.clip(self.compute_target(activation, now), self.lo, self.hi))
+        command = self._limit(self.target, now)
         self.motors.sendMotorCommand(self.motor_id, command)
-        print(
-            f"[{self.state}] "
-            f"velocity={velocity:.3f} rad/s, "
-            f"position={position}, "
-            f"command={command} raw "
-            f"({command * self.CUR_UNIT_MA:.1f} mA)"
-        )
-        return command
+        return activation, self.target, command
 
     def stop(self):
         self._stop = True
 
-    def run(self, duration=None):
-        """Blocking fixed-rate loop. Ends after `duration` seconds, on stop(), or Ctrl+C."""
+    def release(self):
+        """Smoothly move back to the open position."""
+        if self.command is None:
+            return
+        while abs(self.command - self.open_pos) > 1:
+            time.sleep(self.period)
+            now = time.perf_counter()
+            self.motors.sendMotorCommand(self.motor_id, self._limit(self.open_pos, now))
+        self.motors.sendMotorCommand(self.motor_id, int(round(self.open_pos)))
+
+    def run(self, get_activation, duration=None, verbose=True):
+        """Blocking fixed-rate loop. `get_activation()` returns the latest activation
+        (0..1) or None/NaN if there is no valid value. Ends after `duration` s, on
+        stop(), or Ctrl+C, and always returns the finger to the open position."""
         self._stop = False
-        self._state_t0 = None
+        self._t_last = None
         t_end = None if duration is None else time.perf_counter() + duration
         next_t = time.perf_counter()
+        t_valid = time.perf_counter()
+        last = 0.0
         try:
             while not self._stop and (t_end is None or time.perf_counter() < t_end):
-                self.step()
+                value = get_activation()
+                now = time.perf_counter()
+                if value is not None and not math.isnan(value):
+                    t_valid, last = now, value
+                else:                                # no valid value: hold briefly, then open
+                    value = last if now - t_valid <= self.signal_timeout_s else 0.0
+                activation, target, command = self.step(value)
+                if verbose:
+                    print(f"emg={activation:5.2f}  target={target:7.1f}  command={command}  "
+                          + self.status())
                 next_t += self.period
                 time.sleep(max(0.0, next_t - time.perf_counter()))
         except KeyboardInterrupt:
             pass
         finally:
-            self.motors.sendMotorCommand(self.motor_id, 0)  # release the pull
+            self.release()
+
+    def status(self):
+        return ""
+
+
+class ProportionalEMGController(EMGPositionController):
+    """Finger position follows the muscle activation continuously.
+
+        position = open + shape(activation) * (closed - open)
+
+    deadband : activation below this is treated as rest (no motion), the rest
+               of the range is rescaled to 0..1
+    gamma    : shaping exponent. 1 = linear, >1 = finer control at low effort,
+               <1 = more sensitive at low effort
+    The closing speed is limited by max_speed, which also smooths the signal.
+    """
+
+    def __init__(self, *args, deadband=0.1, gamma=1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.deadband = deadband
+        self.gamma = gamma
+
+    def compute_target(self, activation, now):
+        x = np.clip((activation - self.deadband) / (1.0 - self.deadband), 0.0, 1.0)
+        return self.open_pos + (x ** self.gamma) * (self.closed_pos - self.open_pos)
+
+
+class ThresholdEMGController(EMGPositionController):
+    """Open/closed state machine with hysteresis.
+
+    mode "hold"  : closed while the muscle is active, open when relaxed.
+                   activation >= on_threshold for on_dwell_s  -> CLOSED
+                   activation <= off_threshold for off_dwell_s -> OPEN
+    mode "toggle": each contraction flips the state (contract to close, relax,
+                   contract again to open), so the grasp is held without
+                   effort. A new contraction is only accepted after the muscle
+                   has relaxed below off_threshold.
+
+    on_threshold > off_threshold gives hysteresis, the dwell times reject spikes.
+    """
+
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
+    def __init__(self, *args, on_threshold=0.5, off_threshold=0.3, on_dwell_s=0.1,
+                 off_dwell_s=0.2, mode="hold", **kwargs):
+        super().__init__(*args, **kwargs)
+        assert on_threshold > off_threshold, "on_threshold must be above off_threshold"
+        assert mode in ("hold", "toggle")
+        self.on_threshold = on_threshold
+        self.off_threshold = off_threshold
+        self.on_dwell_s = on_dwell_s
+        self.off_dwell_s = off_dwell_s
+        self.mode = mode
+        self.state = self.OPEN
+        self._above_since = None
+        self._below_since = None
+        self._armed = True            # toggle mode: True once the muscle relaxed again
+
+    def _held(self, since, condition, now, dwell):
+        """Return (new_since, satisfied) for 'condition true continuously for dwell s'."""
+        if not condition:
+            return None, False
+        since = now if since is None else since
+        return since, (now - since) >= dwell
+
+    def compute_target(self, activation, now):
+        self._above_since, above = self._held(
+            self._above_since, activation >= self.on_threshold, now, self.on_dwell_s)
+        self._below_since, below = self._held(
+            self._below_since, activation <= self.off_threshold, now, self.off_dwell_s)
+
+        if self.mode == "hold":
+            if self.state == self.OPEN and above:
+                self.state = self.CLOSED
+            elif self.state == self.CLOSED and below:
+                self.state = self.OPEN
+        else:  # toggle
+            if below:
+                self._armed = True
+            if above and self._armed:
+                self.state = self.CLOSED if self.state == self.OPEN else self.OPEN
+                self._armed = False
+        return self.closed_pos if self.state == self.CLOSED else self.open_pos
+
+    def status(self):
+        return f"state={self.state}"
