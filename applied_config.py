@@ -10,6 +10,7 @@ from source.config import (
     CalibrationConfig,
     ChannelConfig,
     ControllerConfig,
+    MotorConfig,
     ProcessingConfig,
     RecordedConfig,
     RuntimeConfig,
@@ -153,6 +154,22 @@ RUNTIME = RuntimeConfig(
     monitor_seconds=5.0,  # seconds of EMG shown in the live view
     max_reconnect_attempts=3,  # after a lost connection
     reconnect_delay_s=1.0,
+)
+
+# Tendon motor, used only with run_emg.py --motor. Position mode (mode 3): the
+# grasp activation (0 = rest, 1 = reference grip) moves the finger between
+# open_pos and closed_pos. Find closed_pos first with main.py --mode pos.
+MOTOR = MotorConfig(
+    port="COM4",
+    baudrate=3000000,
+    motor_id=None,  # the first motor found
+    controller="proportional",  # or "threshold"
+    open_pos=None,  # the position at start
+    closed_pos=None,  # SET BEFORE USE: ticks with the grasp closed
+    max_speed=600.0,  # ticks/s
+    rate_hz=50.0,
+    signal_timeout_s=0.5,  # no valid activation for this long -> open
+    stale_s=0.3,  # newest activation older than this (source lost) -> no signal
 )
 
 

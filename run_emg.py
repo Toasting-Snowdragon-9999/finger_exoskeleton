@@ -11,9 +11,12 @@ Examples:
   python run_emg.py --source recorded --file 10_raw.csv
   python run_emg.py --source recorded --file measurements/20261023-140512_trigno_grip  (replay)
   python run_emg.py --source trigno --headless --duration 30 (status lines, no window)
+  python run_emg.py --source trigno --motor                  (grasp activation drives the motor)
 
 Every mode runs the controller (calibration -> activation -> state machine) and
-shows its stiffness command, the control signal. Nothing physical is driven.
+shows its stiffness command, the control signal. Nothing physical is driven
+unless --motor is given: then the grasp activation moves the tendon motor
+between open and closed (applied_config.MOTOR, position mode).
 """
 
 import argparse
@@ -21,17 +24,27 @@ import contextlib
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import applied_config
 from source.acquisition import Acquisition
-from source.config import SOURCE_KINDS, AppConfig, ConfigError, validate_config
+from source.control_stage import ControlStage
+from source.config import (
+    SOURCE_KINDS,
+    AppConfig,
+    ConfigError,
+    MotorConfig,
+    validate_config,
+    validate_motor_config,
+)
 from source.mock_tcu import MockSensor, MockTCU, MockTCUSettings
+from source.motor_stage import MotorStage, connect_controller, grasp_signal
 from source.emg_source import EMGSource, SourceError
 from source.sensor_mock import RecordedSource, SyntheticSource
 from source.session import RecordingError, SessionLog, create_session_dir, find_recording
 from source.trigno import TrignoSource
 
-EXIT_CONFIG, EXIT_SOURCE, EXIT_RUNTIME = 2, 3, 4
+EXIT_CONFIG, EXIT_SOURCE, EXIT_RUNTIME, EXIT_MOTOR = 2, 3, 4, 5
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -79,6 +92,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--label", help="with --out: short name added to the session folder")
     parser.add_argument("--note", help="with --out: free-text note stored in session.json")
+    parser.add_argument(
+        "--motor",
+        action="store_true",
+        help="drive the tendon motor from the grasp activation (settings: applied_config.MOTOR)",
+    )
+    parser.add_argument("--motor-port", help="with --motor: serial port of the motor")
     return parser.parse_args(argv)
 
 
@@ -206,11 +225,69 @@ def finish_session(session: SessionLog, acquisition: Acquisition) -> None:
     print(f"Session saved to {session.directory}")
 
 
+def motor_config(args: argparse.Namespace) -> MotorConfig | None:
+    """The validated motor settings with --motor, else None. Raises ConfigError."""
+    if not args.motor:
+        return None
+    config = applied_config.MOTOR
+    if args.motor_port:
+        config = replace(config, port=args.motor_port)
+    validate_motor_config(config)
+    return config
+
+
+def start_motor(config: MotorConfig, acquisition: Acquisition) -> tuple[MotorStage, Any]:
+    """Connect the motor and start the motor thread. Raises on connection errors."""
+    motors, controller = connect_controller(config)
+
+    def control() -> ControlStage | None:
+        core = acquisition.core
+        return None if core is None else core.control
+
+    def message(text: str) -> None:
+        if acquisition.core is not None:
+            acquisition.core.message(text)
+        else:
+            print(text)
+
+    stage = MotorStage(controller, grasp_signal(control, config.stale_s), message)
+    stage.start()
+    print(f"Motor control on {config.port}: {config.controller} controller, "
+          f"open {config.open_pos if config.open_pos is not None else 'at start'}, "
+          f"closed {config.closed_pos}")
+    return stage, motors
+
+
+def show_with_motor(
+    args: argparse.Namespace, acquisition: Acquisition, motor: MotorConfig | None
+) -> bool:
+    """
+    show() with the motor driven meanwhile (with --motor). Returns False if the
+    motor could not be started; then nothing is shown.
+    """
+    if motor is None:
+        show(args, acquisition)
+        return True
+    try:
+        stage, motors = start_motor(motor, acquisition)
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        # Motors raises bare Exception for port and motor errors
+        print(f"Cannot start motor control on {motor.port}: {error}", file=sys.stderr)
+        return False
+    try:
+        show(args, acquisition)
+    finally:
+        stage.stop()  # the finger returns to open before the acquisition stops
+        motors.close()
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point; returns the process exit code."""
     args = parse_args(argv)
     try:
         config = with_recording(args, applied_config.build_config(source=args.source))
+        motor = motor_config(args)
     except (ConfigError, RecordingError) as error:
         replay = isinstance(error, RecordingError)
         print(f"{'Cannot replay' if replay else 'Configuration error'}: {error}", file=sys.stderr)
@@ -238,8 +315,10 @@ def main(argv: list[str] | None = None) -> int:
     if session is not None:
         print(f"Recording session {session.directory}")
 
+    exit_code = 0
     try:
-        show(args, acquisition)
+        if not show_with_motor(args, acquisition, motor):
+            exit_code = EXIT_MOTOR
     except KeyboardInterrupt:
         print("Interrupted")
     finally:
@@ -253,8 +332,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Raw EMG saved to {args.save}")
     if acquisition.error:
         print(f"Acquisition error: {acquisition.error}", file=sys.stderr)
-        return EXIT_RUNTIME
-    return 0
+        exit_code = EXIT_RUNTIME
+    return exit_code
 
 
 if __name__ == "__main__":

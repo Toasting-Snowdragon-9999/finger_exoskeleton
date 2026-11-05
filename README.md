@@ -42,6 +42,7 @@ APB in slots 1-4).
 | **Save a measurement** (new session folder per run) | add `--out <folder>` (optional `--label grip --note "subject 1"`) |
 | Record the raw EMG to one CSV file | add `--save logs/session.csv` |
 | Headless (status lines, no window) | add `--headless --duration 30` |
+| **Drive the tendon motor** from the grasp activation | add `--motor` (optional `--motor-port COM5`) |
 | Offline analysis plots (original scripts) | `.venv\Scripts\python.exe main_sensor.py` |
 
 The live window shows one plot per channel: the filtered EMG (20-450 Hz band-pass + 50 Hz
@@ -152,6 +153,30 @@ then reconnect the base station.
 - **Pause before data:** the delay between START and the first data.
 - **Latency:** the real end-to-end delay.
 
+## Driving the motor
+
+With `--motor`, the grasp activation of the live pipeline (0 = rest, 1 = reference grip)
+drives the tendon motor through the EMG position controllers in `source/controllers.py`
+(proportional or threshold), in Dynamixel position mode. The settings are `MOTOR` in
+`applied_config.py`; `closed_pos` must be set first (find it with
+`python main.py --mode pos --command <ticks>`).
+
+```bat
+.venv\Scripts\python.exe run_emg.py --source trigno --motor
+.venv\Scripts\python.exe run_emg.py --source synthetic --motor   (bench test without EMG sensors)
+```
+
+- The controller runs in its own thread (`source/motor_stage.py`) at `MOTOR.rate_hz`, so the
+  serial bus cannot stall EMG acquisition.
+- The finger stays open until calibration succeeds, and opens when the controller is
+  disarmed or in FAULT, and when no fresh activation arrives for `stale_s` +
+  `signal_timeout_s` (source lost).
+- On exit (window closed, `q`, Ctrl+C) the finger returns to open before anything else stops.
+- A motor or bus error stops motor control (shown in the event log); EMG acquisition goes on.
+- Calibration arms the controller at the end of the reference grip, so if the grip is still
+  held the finger closes briefly right after calibration.
+- The stiffness command is not sent to the motor yet.
+
 ## Testing
 
 The test scripts create a `.venv`, install the dev dependencies from `requirements-dev.txt`, and then run flake8, pylint, mypy and pytest.
@@ -185,6 +210,7 @@ source/
   streaming.py               Causal, stateful multi-channel filtering and envelopes
   activation.py              Calibration (rest + reference grip) and normalized activation
   controller.py              State machine DISARMED/IDLE/GRASP_ARMED/STIFFENED -> stiffness
+  motor_stage.py             Motor thread: grasp activation -> EMG position controller -> Dynamixel
   control_stage.py           Runs calibration, activation and controller per block
   acquisition.py             Acquisition thread, ring buffers, CSV recording
   session.py                 Measurement session folders (emg.csv + session.json)

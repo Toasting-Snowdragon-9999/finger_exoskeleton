@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 CHANNEL_ROLES = ("flexor", "extensor", "other")
 SOURCE_KINDS = ("synthetic", "recorded", "trigno")
+MOTOR_CONTROLLERS = ("proportional", "threshold")
 TREMOR_MEASURES = ("depth", "level")
 
 
@@ -158,6 +159,49 @@ class AppConfig:  # pylint: disable=too-many-instance-attributes
     def channel_roles(self) -> tuple[str, ...]:
         """Channel roles in order."""
         return tuple(channel.role for channel in self.channels)
+
+
+@dataclass(frozen=True)
+class MotorConfig:  # pylint: disable=too-many-instance-attributes
+    """
+    The tendon motor (Dynamixel, position mode) driven by the grasp activation
+    through an EMG position controller (source/controllers.py). Positions are
+    raw motor ticks (0-4095 in position mode).
+    """
+
+    port: str = "COM4"
+    baudrate: int = 3000000
+    motor_id: int | None = None  # None: the first motor found
+    controller: str = "proportional"  # "proportional" or "threshold"
+    open_pos: int | None = None  # None: the motor position at start
+    closed_pos: int | None = None  # must be set before the motor is used
+    max_speed: float = 600.0  # ticks/s
+    rate_hz: float = 50.0
+    signal_timeout_s: float = 0.5  # no valid activation for this long -> open
+    stale_s: float = 0.3  # newest activation older than this counts as no signal
+    deadband: float = 0.1  # proportional
+    gamma: float = 1.0  # proportional
+    on_threshold: float = 0.5  # threshold
+    off_threshold: float = 0.3  # threshold
+    toggle: bool = False  # threshold: each contraction toggles open/closed
+
+
+def validate_motor_config(config: MotorConfig) -> None:
+    """Reject motor settings the controllers cannot use."""
+    _check(config.controller in MOTOR_CONTROLLERS,
+           f"motor.controller must be one of {MOTOR_CONTROLLERS}")
+    _check(config.closed_pos is not None, "Set MOTOR closed_pos (ticks) in applied_config.py")
+    _check(config.open_pos is None or config.open_pos != config.closed_pos,
+           "motor.open_pos and closed_pos must differ")
+    for name in ("open_pos", "closed_pos"):
+        value = getattr(config, name)
+        _check(value is None or 0 <= value <= 4095, f"motor.{name} must be 0-4095 (position mode)")
+    _check(config.max_speed > 0 and config.rate_hz > 0, "motor max_speed and rate_hz must be > 0")
+    _check(config.signal_timeout_s >= 0 and config.stale_s > 0,
+           "motor signal_timeout_s must be >= 0 and stale_s > 0")
+    _check(0 <= config.deadband < 1, "motor.deadband must be in [0, 1)")
+    _check(config.on_threshold > config.off_threshold,
+           "motor.on_threshold must be above off_threshold")
 
 
 def _check(condition: bool, message: str) -> None:
