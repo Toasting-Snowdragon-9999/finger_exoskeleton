@@ -31,6 +31,13 @@ from source.config import (
 # One sensor, as paired in the TCU for the first hardware tests.
 ONE_SENSOR = (ChannelConfig(name="FDS", role="flexor", trigno_slot=15, recorded_column=1),)
 
+# Two sensors: flexor on the underside (palm side) of the forearm, extensor on
+# the top side. The flexor drives grasp detection; both are checked for tremor.
+TWO_SENSORS = (
+    ChannelConfig(name="FDS", role="flexor", trigno_slot=15, recorded_column=1),  # dataset FCU
+    ChannelConfig(name="EDC", role="extensor", trigno_slot=14, recorded_column=0),  # dataset ECU
+)
+
 # The planned montage (design doc 7.2 / 8.3), sensors paired to slots 1-4.
 FOUR_SENSORS = (
     ChannelConfig(name="FDS", role="flexor", trigno_slot=1, recorded_column=1),  # dataset FCU
@@ -39,7 +46,7 @@ FOUR_SENSORS = (
     ChannelConfig(name="APB", role="extensor", trigno_slot=4, recorded_column=2),  # dataset ECR
 )
 
-CHANNELS = ONE_SENSOR  # the channels in use: ONE_SENSOR or FOUR_SENSORS
+CHANNELS = TWO_SENSORS  # the channels in use: ONE_SENSOR, TWO_SENSORS or FOUR_SENSORS
 
 # Live Delsys Trigno (DS-T03 / SP-W02 / SP-W06, Trigno Avanti) through the
 # Trigno Control Utility (TCU) TCP/IP SDK, Delsys MAN-025-3-5.
@@ -112,7 +119,10 @@ PROCESSING = ProcessingConfig(
 CALIBRATION = {
     "trigno": CalibrationConfig(
         baseline_window_s=(0.5, 3.0),
-        reference_window_s=(3.5, 6.5),
+        # Wide on purpose: on 2026-11-05 the grip often started at 5.5-7.5 s (the
+        # window opens after streaming starts). The 95th percentile only needs the
+        # grip held for part of the window.
+        reference_window_s=(3.5, 10.0),
         reference_percentile=95.0,  # PROVISIONAL: of the slow envelope in the reference window
         min_reference_ratio=3.0,  # PROVISIONAL: the reference must exceed rest this many times
     ),
@@ -140,7 +150,11 @@ CONTROLLER = ControllerConfig(
     # 4-6 Hz peak, ~0.5 for broadband voluntary fluctuation. 0 disables the gate.
     tremor_min_ratio=0.8,
     tremor_off_ratio=0.6,  # release when the ratio stays below this; 0 = amplitude only
-    tremor_on_time_s=0.05,  # design doc 8.4: engage within tens of ms
+    # Design doc 8.4 asks for tens of ms, but on Trigno data (2026-11-05) fast
+    # grips gave tremor-like transients holding up to 0.3 s and engaged at 0.05 s.
+    # 0.3 s removed them; synthetic 5 Hz tremor is still caught (~1.0 s after onset
+    # instead of ~0.7 s, most of it the 0.5 s tremor window).
+    tremor_on_time_s=0.3,
     tremor_off_time_s=0.75,  # design doc 8.4: release over 0.5-1 s
     engage_stiffness=0.3,  # stiffness when tremor is first detected
     stiffness_gain=2.0,  # extra stiffness per unit tremor above the off threshold
@@ -156,20 +170,27 @@ RUNTIME = RuntimeConfig(
     reconnect_delay_s=1.0,
 )
 
-# Tendon motor, used only with run_emg.py --motor. Position mode (mode 3): the
-# grasp activation (0 = rest, 1 = reference grip) moves the finger between
-# open_pos and closed_pos. Find closed_pos first with main.py --mode pos.
+# Tendon motor, used only with run_emg.py --motor. Extended position mode
+# (mode 4): the grasp activation (0 = rest, 1 = reference grip) moves the
+# finger between open_pos and closed_pos. Measured 2026-11-06 by turning the
+# motor by hand with torque off: closing turns it 1826 ticks (160 deg) down.
+# The values are in the motor's multi-turn count at that time (open read 4659,
+# i.e. 563 within one turn); only their difference and their value modulo 4096
+# matter, the turn the motor counts in is found at start (see turn_shift).
+# The start is refused if the motor is far outside open-closed. Measure both
+# again if the finger or tendon is moved on the motor shaft (2026-11-05: 2964/1204).
 MOTOR = MotorConfig(
     port="COM4",
     baudrate=3000000,
-    motor_id=None,  # the first motor found
+    motor_id=2,  # the tendon motor (ID 1 is left alone)
     controller="proportional",  # or "threshold"
-    open_pos=None,  # the position at start
-    closed_pos=None,  # SET BEFORE USE: ticks with the grasp closed
-    max_speed=600.0,  # ticks/s
+    open_pos=4659,  # ticks with the finger open
+    closed_pos=2833,  # ticks with the grasp closed
+    max_speed=1500.0,  # ticks/s (was 600: too slow to follow a 2 s grip over the full range)
     rate_hz=50.0,
     signal_timeout_s=0.5,  # no valid activation for this long -> open
     stale_s=0.3,  # newest activation older than this (source lost) -> no signal
+    hold_window_s=1.0,  # while STIFFENED: hold the mean grasp activation of this long before
 )
 
 

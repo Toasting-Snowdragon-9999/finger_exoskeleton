@@ -21,6 +21,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -60,8 +61,8 @@ class Calibration:
                     f"calibration with a clear reference contraction."
                 )
 
-    def save(self, path: Path) -> None:
-        """Write the calibration as JSON."""
+    def save(self, path: Path, extra: dict[str, Any] | None = None) -> None:
+        """Write the calibration as JSON; `extra` adds more keys (load() ignores them)."""
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -71,6 +72,7 @@ class Calibration:
                     "reference_slow": self.reference_slow.tolist(),
                     "rest_fast": self.rest_fast.tolist(),
                     "reference_fast": self.reference_fast.tolist(),
+                    **(extra or {}),
                 },
                 indent=2,
             ),

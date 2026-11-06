@@ -12,11 +12,12 @@ Examples:
   python run_emg.py --source recorded --file measurements/20261023-140512_trigno_grip  (replay)
   python run_emg.py --source trigno --headless --duration 30 (status lines, no window)
   python run_emg.py --source trigno --motor                  (grasp activation drives the motor)
+  python run_emg.py --source trigno --calibrate              (calibrate now, replace the saved one)
 
 Every mode runs the controller (calibration -> activation -> state machine) and
 shows its stiffness command, the control signal. Nothing physical is driven
 unless --motor is given: then the grasp activation moves the tendon motor
-between open and closed (applied_config.MOTOR, position mode).
+between open and closed (applied_config.MOTOR, extended position mode).
 """
 
 import argparse
@@ -28,6 +29,8 @@ from typing import Any
 
 import applied_config
 from source.acquisition import Acquisition
+from source.calibration_store import DEFAULT_PATH as DEFAULT_CALIBRATION_PATH
+from source.calibration_store import CalibrationStore
 from source.control_stage import ControlStage
 from source.config import (
     SOURCE_KINDS,
@@ -98,7 +101,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="drive the tendon motor from the grasp activation (settings: applied_config.MOTOR)",
     )
     parser.add_argument("--motor-port", help="with --motor: serial port of the motor")
+    parser.add_argument(
+        "--calibration",
+        type=Path,
+        help="calibration file: loaded if it fits, saved after a successful calibration "
+        f"(default with --source trigno: {DEFAULT_CALIBRATION_PATH}; other sources: none)",
+    )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="calibrate now even if a saved calibration exists, and save the result",
+    )
     return parser.parse_args(argv)
+
+
+def calibration_store(args: argparse.Namespace) -> CalibrationStore | None:
+    """Where the calibration is kept between runs, or None (calibrate every run)."""
+    path = args.calibration or (DEFAULT_CALIBRATION_PATH if args.source == "trigno" else None)
+    return None if path is None else CalibrationStore(path, use_saved=not args.calibrate)
 
 
 def build_source(args: argparse.Namespace, config: AppConfig) -> tuple[EMGSource, MockTCU | None]:
@@ -250,7 +270,8 @@ def start_motor(config: MotorConfig, acquisition: Acquisition) -> tuple[MotorSta
         else:
             print(text)
 
-    stage = MotorStage(controller, grasp_signal(control, config.stale_s), message)
+    signal = grasp_signal(control, config.stale_s, hold_window_s=config.hold_window_s)
+    stage = MotorStage(controller, signal, message)
     stage.start()
     print(f"Motor control on {config.port}: {config.controller} controller, "
           f"open {config.open_pos if config.open_pos is not None else 'at start'}, "
@@ -300,8 +321,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CONFIG
     save_path = session.emg_path if session is not None else args.save
 
+    store = calibration_store(args)
     source, mock = build_source(args, config)
-    acquisition = Acquisition(config, source, save_path)
+    acquisition = Acquisition(config, source, save_path, store)
     try:
         start(acquisition, session, mock)
     except SourceError as error:
@@ -311,7 +333,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Cannot create the recording {save_path}: {error}", file=sys.stderr)
         return EXIT_CONFIG
     print(f"Streaming {source.kind} EMG at {source.sample_rate:g} Hz")
-    print(calibration_instructions(config))
+    saved, note = (None, "") if store is None else store.load(config)
+    if saved is not None:
+        print(f"{note}. Press 'c' in the window (or run with --calibrate) to calibrate again.")
+    else:
+        if note:
+            print(note)
+        print(calibration_instructions(config))
     if session is not None:
         print(f"Recording session {session.directory}")
 

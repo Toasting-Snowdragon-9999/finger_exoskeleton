@@ -164,21 +164,25 @@ class AppConfig:  # pylint: disable=too-many-instance-attributes
 @dataclass(frozen=True)
 class MotorConfig:  # pylint: disable=too-many-instance-attributes
     """
-    The tendon motor (Dynamixel, position mode) driven by the grasp activation
-    through an EMG position controller (source/controllers.py). Positions are
-    raw motor ticks (0-4095 in position mode).
+    The tendon motor (Dynamixel, extended position mode) driven by the grasp
+    activation through an EMG position controller (source/controllers.py).
+    Positions are motor ticks (4096 per turn) and may go below 0 or above
+    4095, but open and closed must be less than one turn apart.
     """
 
     port: str = "COM4"
     baudrate: int = 3000000
     motor_id: int | None = None  # None: the first motor found
     controller: str = "proportional"  # "proportional" or "threshold"
-    open_pos: int | None = None  # None: the motor position at start
+    # None: the motor position at start (closed_pos is then taken within half a
+    # turn of it). Set it for a range of more than half a turn.
+    open_pos: int | None = None
     closed_pos: int | None = None  # must be set before the motor is used
     max_speed: float = 600.0  # ticks/s
     rate_hz: float = 50.0
     signal_timeout_s: float = 0.5  # no valid activation for this long -> open
     stale_s: float = 0.3  # newest activation older than this counts as no signal
+    hold_window_s: float = 1.0  # STIFFENED holds the mean grasp activation of this long before
     deadband: float = 0.1  # proportional
     gamma: float = 1.0  # proportional
     on_threshold: float = 0.5  # threshold
@@ -193,12 +197,16 @@ def validate_motor_config(config: MotorConfig) -> None:
     _check(config.closed_pos is not None, "Set MOTOR closed_pos (ticks) in applied_config.py")
     _check(config.open_pos is None or config.open_pos != config.closed_pos,
            "motor.open_pos and closed_pos must differ")
+    _check(config.open_pos is None or config.closed_pos is None
+           or abs(config.closed_pos - config.open_pos) < 4096,
+           "motor.open_pos and closed_pos must be less than one turn (4096 ticks) apart")
     for name in ("open_pos", "closed_pos"):
         value = getattr(config, name)
-        _check(value is None or 0 <= value <= 4095, f"motor.{name} must be 0-4095 (position mode)")
+        _check(value is None or abs(value) <= 1_048_575,
+               f"motor.{name} is outside the extended position range")
     _check(config.max_speed > 0 and config.rate_hz > 0, "motor max_speed and rate_hz must be > 0")
-    _check(config.signal_timeout_s >= 0 and config.stale_s > 0,
-           "motor signal_timeout_s must be >= 0 and stale_s > 0")
+    _check(config.signal_timeout_s >= 0 and config.stale_s > 0 and config.hold_window_s > 0,
+           "motor signal_timeout_s must be >= 0, stale_s and hold_window_s > 0")
     _check(0 <= config.deadband < 1, "motor.deadband must be in [0, 1)")
     _check(config.on_threshold > config.off_threshold,
            "motor.on_threshold must be above off_threshold")

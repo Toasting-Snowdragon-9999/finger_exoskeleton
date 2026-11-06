@@ -31,6 +31,10 @@ from numpy.typing import NDArray
 
 from .acquisition import Acquisition, ViewerSnapshot
 
+# Fixed y range of the EMG panels in mV, so levels can be compared between runs (None: autoscale).
+# 0 to 0.15 shows the envelopes; the oscillating EMG trace is cut off below 0 and above 0.15.
+EMG_Y_LIMITS: tuple[float, float] | None = (0.0, 0.15)
+
 SIGNAL_COLOR = "#1f77b4"
 ENVELOPE_COLOR = "#d62728"
 FAST_ENVELOPE_COLOR = "#ff7f0e"
@@ -310,9 +314,12 @@ class LiveViewer:  # pylint: disable=too-many-instance-attributes
             self.ratio_lines[row].set_data(seconds_ago, snapshot.tremor_ratio[row])
             if signals.shape[1] == 0:
                 continue
-            low, high = (float(value) for value in np.percentile(signals[row], [0.1, 99.9]))
-            span = max(high - low, 1e-3)
-            ax.set_ylim(low - 0.15 * span, high + 0.15 * span)
+            if EMG_Y_LIMITS is not None:
+                ax.set_ylim(*EMG_Y_LIMITS)
+            else:
+                low, high = (float(value) for value in np.percentile(signals[row], [0.1, 99.9]))
+                span = max(high - low, 1e-3)
+                ax.set_ylim(low - 0.15 * span, high + 0.15 * span)
             # ~0.05 without tremor, ~0.3 or more with it; keep that range visible
             self.tremor_axes[row].set_ylim(0.0, max(float(np.max(depth)) * 1.2, 0.5))
         self.axes[0].set_title(self._title(), fontsize=9)

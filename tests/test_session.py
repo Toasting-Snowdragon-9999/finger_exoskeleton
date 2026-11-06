@@ -25,9 +25,12 @@ def test_session_dirs_are_unique_and_named(tmp_path: Path) -> None:
     assert create_session_dir(tmp_path, "synthetic", " ", NOW).name == "20261023-140512_synthetic"
 
 
-def test_cli_out_saves_each_run_in_its_own_session(tmp_path: Path) -> None:
+def test_cli_out_saves_each_run_in_its_own_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Two runs give two session folders, each with emg.csv and a complete session.json."""
-    args = ["--source", "synthetic", "--headless", "--duration", "1.0", "--out", str(tmp_path)]
+    monkeypatch.setattr(applied_config, "CHANNELS", applied_config.ONE_SENSOR)
+    args =["--source", "synthetic", "--headless", "--duration", "1.0", "--out", str(tmp_path)]
     assert run_emg.main([*args, "--label", "grip", "--note", "subject 1"]) == 0
     assert run_emg.main(args) == 0
 

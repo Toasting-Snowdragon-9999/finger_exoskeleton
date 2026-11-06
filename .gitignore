@@ -220,3 +220,4 @@ __marimo__/
 # Runtime logs and calibrations
 logs/
 measurements/
+calibration*.json

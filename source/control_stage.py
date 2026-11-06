@@ -23,7 +23,8 @@ replayed recording gives the same result as the live run it came from.
 import threading
 from collections.abc import Callable
 
-from .activation import ActivationEstimate, ActivationEstimator, Calibrator
+from .activation import ActivationEstimate, ActivationEstimator, Calibration, Calibrator
+from .calibration_store import CalibrationStore
 from .config import AppConfig
 from .controller import ControllerOutput, ExoskeletonController
 from .streaming import ProcessedBlock
@@ -33,13 +34,27 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
     """Calibration, activation and control for one block at a time."""
 
     def __init__(
-        self, config: AppConfig, sample_rate: float, message: Callable[[str], None]
+        self,
+        config: AppConfig,
+        sample_rate: float,
+        message: Callable[[str], None],
+        store: CalibrationStore | None = None,
     ) -> None:
         self.config = config
         self.sample_rate = sample_rate
         self._message = message
         self.calibrator = Calibrator(config.calibration, config.channel_names, sample_rate)
         self.estimator: ActivationEstimator | None = None
+        # A saved calibration (see calibration_store.py) replaces the routine; the controller
+        # then starts calibrated on the first block. 'c' / request_recalibration() redoes it.
+        self._store = store
+        self._loaded = False
+        self._note = ""  # said on the first block: the message log is not ready yet here
+        if store is not None:
+            saved, self._note = store.load(config)
+            if saved is not None:
+                self.calibrator.result = saved
+                self._loaded = True
         self.controller = ExoskeletonController(config.controller)
         self.activation: ActivationEstimate | None = None
         self.last_output: ControllerOutput | None = None
@@ -86,6 +101,7 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
         self._relaxed_since = None
         self.activation = None
         self._reported_error = None
+        self._loaded = False
         self.calibrator.restart()
         windows = self.config.calibration
         self._message(
@@ -96,6 +112,9 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
 
     def step(self, processed: ProcessedBlock) -> ControllerOutput:
         """Calibrate or estimate activation from one block, then advance the controller."""
+        if self._note:
+            self._message(self._note)
+            self._note = ""
         if self._recalibrate.is_set():
             self._recalibrate.clear()
             self._restart_calibration()
@@ -123,6 +142,16 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
             self.controller.arm()
             self._message("Hand relaxed; controller armed")
 
+    def _save_calibration(self, calibration: Calibration) -> None:
+        """Keep a successful calibration for the next runs; a failure to write is only reported."""
+        assert self._store is not None
+        try:
+            self._store.save(calibration, self.config)
+        except OSError as error:
+            self._message(f"Could not save the calibration to {self._store.path}: {error}")
+        else:
+            self._message(f"Calibration saved to {self._store.path}; later runs use it")
+
     def _finish_calibration(self) -> None:
         calibrator = self.calibrator
         if calibrator.result is not None:
@@ -131,7 +160,8 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
             )
             self._arm_pending = True
             self._relaxed_since = None
-            self._message("Calibration complete; relax the hand to arm the controller")
+            start = "Using the saved calibration" if self._loaded else "Calibration complete"
+            self._message(f"{start}; relax the hand to arm the controller")
             levels = " ".join(
                 f"{name} {rest * 1000:.0f}/{ref * 1000:.0f}"
                 for name, rest, ref in zip(
@@ -141,6 +171,8 @@ class ControlStage:  # pylint: disable=too-many-instance-attributes
                 )
             )
             self._message(f"  rest/reference uV: {levels}")
+            if not self._loaded and self._store is not None:
+                self._save_calibration(calibrator.result)
         elif calibrator.error is not None and self._reported_error != calibrator.error:
             self._reported_error = calibrator.error
             self._message(f"Calibration failed: {calibrator.error} Press 'c' to repeat it.")

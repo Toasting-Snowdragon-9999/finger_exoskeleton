@@ -7,15 +7,19 @@ import numpy as np
 class Motors:
     # Class variables
     POS_CONTROL = 3
+    EXT_POS_CONTROL = 4   # extended (multi-turn) position mode
     VEL_CONTROL = 1
     CUR_CONTROL = 0
     CONTROL_DICT = {"pos": POS_CONTROL,
+                    "ext": EXT_POS_CONTROL,
                     "vel": VEL_CONTROL,
                     "cur": CUR_CONTROL}
 
     """ Check which COM-port the motor is connected to by using the command
-    python "-m serial.tools.list_ports" in the terminal."""
-    def __init__(self, port="COM3", baudrate=3000000):
+    python "-m serial.tools.list_ports" in the terminal.
+    init_mode: control mode set on all motors at start, after which their torque is enabled.
+    None leaves the mode and torque of every motor untouched."""
+    def __init__(self, port="COM3", baudrate=3000000, init_mode="cur"):
         # Set memeber variables
         self.port = port
         self.baudrate = baudrate
@@ -100,30 +104,35 @@ class Motors:
         print(f"Max and min positions: {self.maxPos}, {self.minPos}, "
               f"current: {self.maxCur}, {self.minCur}, velocity: {self.maxVel}, {self.minVel}")
 
-        # self.set_cont_mode("pos")
-        self.set_cont_mode("cur")
+        if init_mode is not None:
+            self.set_cont_mode(init_mode)
+            self.enable_torque()
 
-        self.enable_torque()
+    def _indices(self, motor_ids):
+        """Indices into motor_ids for the given IDs (None: all motors)."""
+        if motor_ids is None:
+            return range(self.num_motors)
+        for motor_id in motor_ids:
+            assert motor_id in self.motor_ids, f"Motor ID {motor_id} not found."
+        return [self.motor_ids.index(motor_id) for motor_id in motor_ids]
 
-    """ Enable torque for all motors """
-    def enable_torque(self):
-        for i in range(self.num_motors):
+    """ Enable torque for the given motors (None: all motors) """
+    def enable_torque(self, motor_ids=None):
+        for i in self._indices(motor_ids):
             if not self.torque_enabled[i]:
                 self.write(self.motor_ids[i], 64, 1, 1)
                 self.torque_enabled[i] = True
             else:
                 print(f"Motor {self.motor_ids[i]} torque is already enabled.")
-        print("All motors torque enabled.")
+        print("Torque enabled.")
 
-    """ Disable torque for all motors """
-    def disable_torque(self):
-        for i in range(self.num_motors):
-            if self.torque_enabled[i]:
-                self.write(self.motor_ids[i], 64, 1, 0)
-                self.torque_enabled[i] = False
-            else:
-                print(f"Motor {self.motor_ids[i]} torque is already disabled.")
-        print("All motors torque disabled.")
+    """ Disable torque for the given motors (None: all motors). Always written, so a motor
+    left with torque on (by an earlier run) is turned off too. """
+    def disable_torque(self, motor_ids=None):
+        for i in self._indices(motor_ids):
+            self.write(self.motor_ids[i], 64, 1, 0)
+            self.torque_enabled[i] = False
+        print("Torque disabled.")
 
     """ Ping all possible motor IDs and return a list of the IDs that respond. """
     def get_motor_ids(self):
@@ -247,7 +256,7 @@ class Motors:
                 self.close()
                 raise Exception("Failed to get data from motor ID for current")
 
-            self.now_pos[i] = self.pos_gsr.getData(self.motor_ids[i], 132, 4)
+            self.now_pos[i] = self.byte2num(self.pos_gsr.getData(self.motor_ids[i], 132, 4), 4)
             self.now_vel[i] = self.byte2num(
                 self.vel_gsr.getData(self.motor_ids[i], 128, 4), 4) * self.RPM
             # 1 current unit = 2.69 mA * conversion to A
@@ -263,7 +272,7 @@ class Motors:
         assert (len(control_commands) == self.num_motors), \
             "the length of control_commands should be equal to the number of motors"
         for i in range(self.num_motors):
-            if self.control_mode[i] == self.POS_CONTROL:
+            if self.control_mode[i] in (self.POS_CONTROL, self.EXT_POS_CONTROL):
                 self.sync_write(self.pos_gsw, self.motor_ids[i], byte_num, control_commands[i])
             elif self.control_mode[i] == self.VEL_CONTROL:
                 self.sync_write(self.vel_gsw, self.motor_ids[i], byte_num, control_commands[i])
@@ -274,7 +283,7 @@ class Motors:
                 raise Exception(f"Motor {self.motor_ids[i]} has unknown control mode.")
 
         # syncwrite
-        if self.control_mode[0] == self.POS_CONTROL:
+        if self.control_mode[0] in (self.POS_CONTROL, self.EXT_POS_CONTROL):
             dxl_comm_result = self.pos_gsw.txPacket()
             if dxl_comm_result != COMM_SUCCESS:
                 print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))
@@ -290,24 +299,26 @@ class Motors:
                 print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))
             self.cur_gsw.clearParam()
 
-    """ Set control mode for all motors. mode: "pos", "vel" or "cur" """
-    def set_cont_mode(self, mode="pos"):
-        for i in range(self.num_motors):
+    """ Set control mode for the given motors (None: all motors). mode: "pos", "ext", "vel" or
+    "cur". Torque must be disabled. """
+    def set_cont_mode(self, mode="pos", motor_ids=None):
+        for i in self._indices(motor_ids):
             if self.control_mode[i] != self.CONTROL_DICT[mode]:
                 self.write(self.motor_ids[i], 11, 1, self.CONTROL_DICT[mode])
                 self.control_mode[i] = self.CONTROL_DICT[mode]
-        print(f"All motors set to {mode} control mode.")
+        print(f"Motors set to {mode} control mode.")
 
-    """ Get the current position of all motors in ticks (0-4095) """
+    """ Get the current position of all motors in ticks (signed: 0-4095 in position mode,
+    multi-turn and possibly negative in extended position, velocity and current mode) """
     def get_position(self, motor_id=None):
         if motor_id is None:
             for i in range(self.num_motors):
-                self.now_pos[i] = self.read(self.motor_ids[i], 132, 4)
+                self.now_pos[i] = self.byte2num(self.read(self.motor_ids[i], 132, 4), 4)
             return self.now_pos
         else:
             assert motor_id in self.motor_ids, f"Motor ID {motor_id} not found."
             idx = self.motor_ids.index(motor_id)
-            pos = self.read(motor_id, 132, 4)
+            pos = self.byte2num(self.read(motor_id, 132, 4), 4)
             self.now_pos[idx] = pos
             return pos
 
@@ -353,7 +364,7 @@ class Motors:
     def sendMotorCommand(self, motor_id, command):
         assert (motor_id in self.motor_ids), f"Motor ID {motor_id} not found."
         idx = self.motor_ids.index(motor_id)
-        if self.control_mode[idx] == self.POS_CONTROL:
+        if self.control_mode[idx] in (self.POS_CONTROL, self.EXT_POS_CONTROL):
             self.write(motor_id, 116, 4, command)
         elif self.control_mode[idx] == self.VEL_CONTROL:
             self.write(motor_id, 104, 4, command)

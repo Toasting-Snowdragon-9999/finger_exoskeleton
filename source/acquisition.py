@@ -33,6 +33,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from .calibration_store import CalibrationStore
 from .config import AppConfig
 from .control_stage import ControlStage
 from .controller import ControllerState
@@ -174,7 +175,11 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
     """Filtering, buffering, gap detection, recording and control, one block at a time."""
 
     def __init__(
-        self, config: AppConfig, sample_rate: float, recorder: EMGRecorder | None = None
+        self,
+        config: AppConfig,
+        sample_rate: float,
+        recorder: EMGRecorder | None = None,
+        calibration_store: CalibrationStore | None = None,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("The sample rate must be known before acquisition starts")
@@ -183,7 +188,7 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
         self.recorder = recorder
         n_channels = len(config.channel_names)
         self.processor = StreamingProcessor(config.processing, n_channels, sample_rate)
-        self.control = ControlStage(config, sample_rate, self.message)
+        self.control = ControlStage(config, sample_rate, self.message, calibration_store)
         capacity = max(2, int(config.runtime.monitor_seconds * sample_rate))
         self._time = RingBuffer(1, capacity)
         self._raw = RingBuffer(n_channels, capacity)
@@ -335,10 +340,17 @@ class StreamCore:  # pylint: disable=too-many-instance-attributes
 class Acquisition:
     """Runs a StreamCore on a source in a background thread."""
 
-    def __init__(self, config: AppConfig, source: EMGSource, save_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        source: EMGSource,
+        save_path: Path | None = None,
+        calibration_store: CalibrationStore | None = None,
+    ) -> None:
         self.config = config
         self.source = source
         self.save_path = save_path
+        self.calibration_store = calibration_store
         self.core: StreamCore | None = None
         self.error: str | None = None
         self._stop = threading.Event()
@@ -362,7 +374,9 @@ class Acquisition:
                 self.source.stop()
                 self._connected = False
                 raise
-        self.core = StreamCore(self.config, self.source.sample_rate, recorder)
+        self.core = StreamCore(
+            self.config, self.source.sample_rate, recorder, self.calibration_store
+        )
         self.core.message(f"Source started: {self.source.kind} at {self.source.sample_rate:g} Hz")
         self._thread = threading.Thread(target=self._loop, name="acquisition", daemon=True)
         self._thread.start()

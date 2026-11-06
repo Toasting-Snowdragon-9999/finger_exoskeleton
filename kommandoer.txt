@@ -1,0 +1,36 @@
+KOMMANDOER (kør fra projektmappen i PowerShell)
+
+Stop: tryk Ctrl+C EN gang og vent til prompten er tilbage (ca. 3 s), eller luk plotvinduet / tast q.
+Motor: fingeren skal stå åben før start. Tag 12 V-stikket ud, hvis noget går galt.
+Kalibreringen til den nuværende sensorplacering ligger i measurements\plac_calibration.json.
+
+
+Kun vis emg data (ingen optagelse, ingen motor):
+.venv\Scripts\python.exe run_emg.py --source trigno --calibration measurements\plac_calibration.json
+
+Motor kører på 2 lange greb optagelse (uden tremor):
+.venv\Scripts\python.exe run_emg.py --source recorded --file measurements\20261105-144738_trigno_to-lange-greb --calibration calibration_replay.json --motor --motor-port COM5 --headless --duration 60
+
+Motor kører på samme optagelse med syntetisk tremor lagt ovenpå:
+.venv\Scripts\python.exe run_emg.py --source recorded --file measurements\20261105-144738_trigno_to-lange-greb_tremor --calibration calibration_replay.json --motor --motor-port COM5 --headless --duration 60
+
+Motor kører på live sensorer:
+.venv\Scripts\python.exe run_emg.py --source trigno --calibration measurements\plac_calibration.json --motor --motor-port COM5 --headless --duration 60
+
+Optag en session (gemmes i measurements\, skift "navn"):
+.venv\Scripts\python.exe run_emg.py --source trigno --out measurements --label navn --calibration measurements\plac_calibration.json
+
+Lav en ny kalibrering og gem den (hvile 0,5-3 s, så fast greb inden 10 s):
+.venv\Scripts\python.exe run_emg.py --source trigno --calibrate --calibration measurements\plac_calibration.json
+
+Sammenlign sensorplaceringer (en mappe pr. placering):
+.venv\Scripts\python.exe compare_placement.py measurements\<mappe-A> measurements\<mappe-B>
+
+Læg syntetisk tremor ind i en optagelse (ny mappe med endelsen _tremor):
+.venv\Scripts\python.exe add_tremor.py measurements\<mappe> --span 7.5-11.5 --span 15.8-18.2
+
+Se hvilke COM-porte der findes (motoren var COM5):
+.venv\Scripts\python.exe -m serial.tools.list_ports
+
+Kør alle tests:
+.venv\Scripts\python.exe -m pytest -q

@@ -61,10 +61,19 @@ controller watches, and the **stiffness** command 0-1, which is the control sign
 physical is driven. The panel title shows the state (`DISARMED`, `IDLE`, `GRASP_ARMED`,
 `STIFFENED`) and the last transition; the dashed lines are the on-thresholds.
 
-The controller needs a calibration at the start of every run (the windows are per source
-in `CALIBRATION` in `applied_config.py`; for Trigno: rest from 0.5 to 2.5 s, then hold a
-firm grip from 3.5 to 6.5 s). It arms itself when the calibration succeeds and stays
-`DISARMED` with a message if it fails. Press `c` to repeat the calibration at any time.
+The controller needs a calibration (the windows are per source in `CALIBRATION` in
+`applied_config.py`; for Trigno: rest from 0.5 to 3 s, then hold a firm grip for a few
+seconds between 3.5 and 10 s). It arms itself when the calibration succeeds and stays
+`DISARMED` with a message if it fails.
+
+With `--source trigno` the calibration is only done when you ask for it: a successful one
+is saved to `calibration.json` and loaded by later runs (the controller then arms as soon
+as the hand is relaxed, no rest/grip routine). Calibrate again with `--calibrate` or the `c`
+key in the window; both replace the saved file. A saved file is ignored, with a message, if
+it is for other channels, was made with other signal processing settings, or fails the
+reference check. It is one sensor placement on one day, so calibrate again after moving the
+sensors. `--calibration FILE` picks another file, also for `--source recorded` or `synthetic`
+(which otherwise calibrate every run).
 Thresholds and stiffness shaping are in `CONTROLLER` in `applied_config.py`; with
 `--source synthetic` the panel shows the whole cycle (grasp, grasp + tremor, release).
 
@@ -157,7 +166,7 @@ then reconnect the base station.
 
 With `--motor`, the grasp activation of the live pipeline (0 = rest, 1 = reference grip)
 drives the tendon motor through the EMG position controllers in `source/controllers.py`
-(proportional or threshold), in Dynamixel position mode. The settings are `MOTOR` in
+(proportional or threshold), in Dynamixel extended position mode. The settings are `MOTOR` in
 `applied_config.py`; `closed_pos` must be set first (find it with
 `python main.py --mode pos --command <ticks>`).
 
@@ -176,7 +185,15 @@ drives the tendon motor through the EMG position controllers in `source/controll
 - After calibration the controller arms only once the hand has relaxed (grasp activation at
   most `grasp_off_threshold` for `grasp_off_time_s`; the viewer shows "relax to arm"), so a
   reference grip that is still held does not close the finger.
+- The finger only follows the grasp activation in `GRASP_ARMED`. In `IDLE` it stays open, so
+  rest activity such as rest tremor does not move it. In `STIFFENED` (tremor during a grasp)
+  it holds the position of the mean grasp activation over `hold_window_s` before the tremor
+  was detected, instead of following the tremor-modulated activation.
 - The stiffness command is not sent to the motor yet.
+- The tendon motor runs in extended position mode, so `open_pos`/`closed_pos` may cross the
+  0/4095 wrap; only `motor_id` is touched, other motors on the bus are left alone.
+- To test tremor handling on real EMG, `add_tremor.py` lays synthetic tremor over a recorded
+  session (see its `--help`); replay the result with `--source recorded --file <folder>`.
 
 ## Testing
 

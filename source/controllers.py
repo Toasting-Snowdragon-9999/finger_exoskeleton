@@ -39,8 +39,9 @@ import numpy as np
 class EMGPositionController:
     """Common machinery: EMG -> activation -> target position -> safe motor command.
 
-    The motor must be in POSITION control mode. Positions are raw Dynamixel
-    ticks (position mode covers one turn, 0..4095 on the XM430/XL430).
+    The motor must be in POSITION or EXTENDED POSITION control mode. Positions
+    are raw Dynamixel ticks (position mode covers one turn, 0..4095; extended
+    position mode is multi-turn and may go negative).
 
     Parameters
     ----------
@@ -56,8 +57,9 @@ class EMGPositionController:
     def __init__(self, motors, motor_id, open_pos, closed_pos,
                  max_speed=600.0, rate_hz=50.0, signal_timeout_s=0.5):
         assert motor_id in motors.motor_ids, f"Motor ID {motor_id} not found."
-        assert motors.control_mode[motors.motor_ids.index(motor_id)] == motors.POS_CONTROL, \
-            "EMG controllers require the motor to be in position control mode."
+        position_modes = (motors.POS_CONTROL, getattr(motors, "EXT_POS_CONTROL", motors.POS_CONTROL))
+        assert motors.control_mode[motors.motor_ids.index(motor_id)] in position_modes, \
+            "EMG controllers require the motor to be in (extended) position control mode."
         assert open_pos != closed_pos, "open_pos and closed_pos must differ."
 
         self.motors = motors
