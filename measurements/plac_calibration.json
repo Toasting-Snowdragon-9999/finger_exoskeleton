@@ -1,0 +1,44 @@
+{
+  "channel_names": [
+    "FDS",
+    "EDC"
+  ],
+  "rest_slow": [
+    0.0041541320656464644,
+    0.002973401878984759
+  ],
+  "reference_slow": [
+    0.06664143287971423,
+    0.29568128785572106
+  ],
+  "rest_fast": [
+    0.0033033151213606735,
+    0.0023660371652053248
+  ],
+  "reference_fast": [
+    0.05029070347574474,
+    0.25712051373837974
+  ],
+  "saved_at": "2026-11-06T11:06:37+01:00",
+  "processing": {
+    "bandpass_low_hz": 20.0,
+    "bandpass_high_hz": 450.0,
+    "bandpass_order": 4,
+    "notch_enabled": true,
+    "notch_hz": 50.0,
+    "notch_quality": 30.0,
+    "slow_window_s": 0.2,
+    "fast_cutoff_hz": 10.0,
+    "tremor_band_hz": [
+      4.0,
+      6.0
+    ],
+    "tremor_window_s": 0.5,
+    "rhythm_band_hz": [
+      1.0,
+      9.0
+    ],
+    "depth_min_envelope_mv": 0.01,
+    "frequency_window_s": 2.0
+  }
+}
