@@ -23,7 +23,10 @@ Optag en session (gemmes i measurements\, skift "navn"):
 Lav en ny kalibrering og gem den (hvile 0,5-3 s, så fast greb inden 10 s):
 .venv\Scripts\python.exe run_emg.py --source trigno --calibrate --calibration measurements\plac_calibration.json
 
-Se hvilke COM-porte der findes (motoren var COM5):
+Prøv programmet uden hardware (en falsk TCU afspiller en optagelse):
+.venv\Scripts\python.exe run_emg.py --source trigno --mock-tcu
+
+Se hvilke COM-porte der findes (motoren var COM5, som nu også er standard i settings.py):
 .venv\Scripts\python.exe -m serial.tools.list_ports
 
 Kør alle tests:

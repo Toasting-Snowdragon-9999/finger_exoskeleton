@@ -24,225 +24,167 @@ py -3 -m venv .venv
 
 On Linux / macOS, use `python3 -m venv .venv` and `.venv/bin/python` instead.
 
-The project currently does **EMG acquisition and live viewing only**; there is no
-controller or actuator code. All settings (channels and muscles, Trigno, filters, view
-window) are in [applied_config.py](applied_config.py); their types, defaults and validation
-(the blueprint) are in [source/config.py](source/config.py). `CHANNELS`
-selects `ONE_SENSOR` (FDS in TCU slot 15, the default) or `FOUR_SENSORS` (FDS, EDC, FDI,
-APB in slots 1-4).
+All settings (sensors and slots, Trigno, filters, calibration, controller thresholds, motor
+positions) are plain constants in [settings.py](settings.py). The commands used on the
+bench are in [kommandoer.txt](kommandoer.txt).
 
-| Mode | Command |
+| What | Command |
 |---|---|
 | Live Delsys Trigno | `.venv\Scripts\python.exe run_emg.py --source trigno` |
-| Trigno backend against a mock TCU (no hardware) | `.venv\Scripts\python.exe run_emg.py --source trigno --mock-tcu` |
-| Synthetic EMG | `.venv\Scripts\python.exe run_emg.py --source synthetic` |
-| Recorded EMG (dataset) | `.venv\Scripts\python.exe run_emg.py --source recorded --file 10_raw.csv` |
-| **Replay one of your sessions** (no sensors needed) | `.venv\Scripts\python.exe run_emg.py --source recorded --file D:\EMG\measurements\20261023-140512_trigno_grip` |
+| A fake TCU playing a recording (no hardware) | `.venv\Scripts\python.exe run_emg.py --source trigno --mock-tcu` |
+| Replay a recorded session | `.venv\Scripts\python.exe run_emg.py --source recorded --file measurements\<session folder>` |
 | Play a recording once instead of looping | add `--no-loop` |
-| **Save a measurement** (new session folder per run) | add `--out <folder>` (optional `--label grip --note "subject 1"`) |
-| Record the raw EMG to one CSV file | add `--save logs/session.csv` |
-| Headless (status lines, no window) | add `--headless --duration 30` |
-| **Drive the tendon motor** from the grasp activation | add `--motor` (optional `--motor-port COM5`) |
-| Offline analysis plots (original scripts) | `.venv\Scripts\python.exe main_sensor.py` |
+| Record the run in a new session folder | add `--out measurements` (optional `--label grip`) |
+| Status lines instead of a window | add `--headless --duration 30` |
+| Drive the tendon motor | add `--motor` (optional `--motor-port COM5`) |
+| Use or write another calibration file | add `--calibration <file>` |
+| Calibrate again | add `--calibrate`, or press `c` in the window |
 
-The live window shows one plot per channel: the filtered EMG (20-450 Hz band-pass + 50 Hz
-notch) with its 200 ms RMS envelope, and a status panel with the connection, the
-reported and measured sample rate, the current RMS per channel and counters (blocks,
-missing samples, reconnections). Keys: `r` raw/filtered, `c` recalibrate, `space` pause, `q` quit.
+The window shows the filtered EMG of every channel with its slow envelope (effort) and fast
+envelope (tremor bursts), a controller panel (grasp activation, tremor depth and stiffness,
+with the on-thresholds dashed) and a text panel with the latest values, the controller
+state, the calibration and messages. Keys: `c` calibrate again, `q` quit.
 
-`--save` writes a CSV with a header row, then `time_s` and one column per channel in mV
-(the raw samples, exactly as received).
+### Calibration
 
-### The controller panel (control signal)
+The controller needs to know the rest and grip levels of the muscles: rest from 0.5 to 3 s,
+then hold a firm grip somewhere between 3.5 and 10 s. When the calibration succeeds the
+controller arms as soon as the hand has relaxed (the window shows "relax to arm"); if it
+fails, it says why and stays `DISARMED`.
 
-Every mode also runs the controller and shows its output in the bottom panel and in the
-status text: **grasp activation** (0 = rest, 1 = reference grip), the **tremor depth** the
-controller watches, and the **stiffness** command 0-1, which is the control signal. Nothing
-physical is driven. The panel title shows the state (`DISARMED`, `IDLE`, `GRASP_ARMED`,
-`STIFFENED`) and the last transition; the dashed lines are the on-thresholds.
+With `--source trigno` a successful calibration is saved to `calibration.json` and used by
+later runs, so the routine is only done when you ask for it (`--calibrate` or the `c` key).
+A saved file is ignored, with a message, if it is for other channels, was made with other
+filter settings, or its grip is not at least 3x the rest level. It belongs to one sensor
+placement, so calibrate again after moving the sensors. Replays and the fake TCU calibrate
+every run unless you give `--calibration <file>`.
 
-The controller needs a calibration (the windows are per source in `CALIBRATION` in
-`applied_config.py`; for Trigno: rest from 0.5 to 3 s, then hold a firm grip for a few
-seconds between 3.5 and 10 s). It arms itself when the calibration succeeds and stays
-`DISARMED` with a message if it fails.
+### The controller
 
-With `--source trigno` the calibration is only done when you ask for it: a successful one
-is saved to `calibration.json` and loaded by later runs (the controller then arms as soon
-as the hand is relaxed, no rest/grip routine). Calibrate again with `--calibrate` or the `c`
-key in the window; both replace the saved file. A saved file is ignored, with a message, if
-it is for other channels, was made with other signal processing settings, or fails the
-reference check. It is one sensor placement on one day, so calibrate again after moving the
-sensors. `--calibration FILE` picks another file, also for `--source recorded` or `synthetic`
-(which otherwise calibrate every run).
-Thresholds and stiffness shaping are in `CONTROLLER` in `applied_config.py`; with
-`--source synthetic` the panel shows the whole cycle (grasp, grasp + tremor, release).
-
-### Saving measurements
-
-Give a measurement folder with `--out`; every run gets its own sub-folder there, so
-nothing is ever overwritten:
-
-```bat
-.venv\Scripts\python.exe run_emg.py --source trigno --out D:\EMG\measurements --label grip --note "subject 1, right hand"
-```
+`source/stiffness_controller.py` decides from the grasp activation (0 = rest, 1 = the
+calibration grip) and the tremor depth and ratio:
 
 ```
-D:\EMG\measurements\
-  20261023-140512_trigno_grip\
-    emg.csv        time_s and one column per channel in mV (raw, as received)
-    session.json   start/end time, status, source and TCU details, sample rate,
-                   channels and slots, label, note, counters (gaps, reconnections),
-                   events (reconnects, timeouts, ... with their time in the
-                   recording), errors and the full configuration in use
+DISARMED -> (calibrated, hand relaxed) -> IDLE -> (grip) -> GRASP_ARMED -> (rhythmic tremor) -> STIFFENED
 ```
 
-The folder name is `<date>-<time>_<source>[_<label>]`, so a synthetic or mock run cannot
-be mistaken for a real one. The CSV is flushed to disk every second, and `session.json` is
-written when streaming starts (`"status": "recording"`) and again when the run ends
-(`"complete"` or `"error"`), so a crash keeps everything recorded up to that point. If the
-source cannot start, no folder is left behind. Stop a recording by closing the window,
-pressing `q`, or Ctrl+C.
+and back when the grip is released or the tremor stops. In `STIFFENED` it computes a
+stiffness 0-1 that grows with the tremor depth. The stiffness is only shown; the motor
+uses the state (see below).
 
-`time_s` is the sample index divided by the sample rate, so lost samples show up as a jump
-in `time_s` (and in the `gaps` / `missing samples` counters). After a reconnection the
-count continues, so the pause itself is not visible in `time_s`; see `events`.
+### Recording and replaying
 
-### Using saved measurements without sensors
+With `--out <folder>` every run gets its own sub-folder, so nothing is overwritten:
 
-Replay a session through the live pipeline (filters, envelopes, viewer) exactly as it was
-recorded: `--source recorded --file <session folder>`. The channels and the sample rate
-come from `session.json`, whatever `CHANNELS` is set to. A plain `--save` CSV works too
-(the sample rate then follows from `time_s`). Replaying with `--out` saves an identical copy.
+```
+measurements\
+  20261105-144738_trigno_grip\
+    emg.csv        time_s and one column per channel in mV (the raw samples)
+    session.json   start/end time, source and TCU details, sample rate, channels,
+                   filter settings, messages with their time, and any error
+```
+
+`emg.csv` is flushed every second and `session.json` is written at the start and the end,
+so a crash keeps what was recorded. Replay a folder with
+`--source recorded --file <folder>`: the channels and sample rate come from `session.json`.
 
 For analysis in Python:
 
 ```python
 from pathlib import Path
-from source.session import find_recording
+from source.recording import Recording
 
-recording = find_recording(Path(r"D:\EMG\measurements\20261023-140512_trigno_grip"))
-times, emg = recording.load()          # (n,) in s, (n_channels, n) in mV
-names = [channel.name for channel in recording.channels]
-rate = recording.sample_rate_hz
-note = recording.metadata["note"]      # everything in session.json
+recording = Recording(Path("measurements/20261105-144738_trigno_to-lange-greb"))
+recording.times          # (n,) in s
+recording.emg            # (n_channels, n) in mV
+recording.channels       # names, roles and slots
+recording.metadata       # everything in session.json
 ```
 
-### First connection to the Delsys Trigno (DS-T03 / SP-W02 / SP-W06)
+### First connection to the Delsys Trigno
 
 1. Install the Delsys Trigno Control Utility (TCU, from the free "Trigno SDK Server"
    installer) on a Windows PC. Connect the base station by USB and start the TCU.
-2. In the TCU, pair the sensors to slots 1-4, the slots in `CHANNELS` in `applied_config.py`.
-   Put each sensor on the muscle named there: FDS, EDC, FDI, APB. Close EMGworks and any
-   other software that might be using the base station.
-3. Run `.venv\Scripts\python.exe run_emg.py --source trigno`. On start-up the
-   program queries the TCU and refuses to run if a slot is unpaired or the units are not
-   volts. It reports the sample rate it derived. If the TCU runs on another PC, add
-   `--host <ip>`.
-4. Check the live view:
-   - Raw EMG should be near zero at rest and rise with contraction.
-   - The sample rate should be 2000 Hz with Backwards Compatibility and Upsample on, or
-     1111.111 Hz on port 50043 with Upsample off.
-   - Look for warnings in the status panel.
+2. In the TCU, pair the sensors to the slots in `CHANNELS` in `settings.py` (FDS in slot 15,
+   EDC in slot 14). Close EMGworks and any other software using the base station.
+3. Run `.venv\Scripts\python.exe run_emg.py --source trigno`. It stops with a message if a
+   slot has no paired sensor. If the TCU runs on another PC, add `--host <ip>` and open the
+   ports 50040-50044 in that PC's firewall.
 
-**Verified on hardware** (TCU / Trigno SDK Server 3.6.0, one sensor):
-- **STARTINDEX base is 1:** the sensor in slot 4 reports `STARTINDEX 4` and its data is
-  in 0-based column 3 of the EMG port, so `start_index_base=1` in `TRIGNO`.
-- **Units reply is `V`** (the SDK guide's example shows `Volts`).
-- **Sample rate:** 2000 Hz on port 50043 with Backwards Compatibility and Upsample on,
-  although `MAX SAMPLES EMG?` reports 17 (the sensor's native ~1259 Hz).
-- **STOP takes ~2.6 s** to reply `OK`, hence `command_timeout_s=5.0`.
+Checked on the hardware (TCU 3.6.0): `STARTINDEX` counts from 1; the units reply is `V`;
+the EMG port streams 2000 Hz with Backwards Compatibility and Upsample on, although
+`MAX SAMPLES EMG?` reports 17 (about 1259 Hz); `STOP` takes about 2.6 s to answer.
 
 If the TCU reports "drivers are missing" and the base station shows Code 28 in Device
 Manager, install the driver from an administrator terminal:
 `pnputil /add-driver "C:\Program Files (x86)\Delsys, Inc\Trigno SDK\Drivers\Trigno\SiUSBXp.inf" /install`,
 then reconnect the base station.
 
-**Not yet verified on hardware:**
-- **Reply format:** the exact replies (`UPSAMPLING?`, `FRAME INTERVAL?`, ...) and the banner.
-- **Pause before data:** the delay between START and the first data.
-- **Latency:** the real end-to-end delay.
-
 ## Driving the motor
 
-With `--motor`, the grasp activation of the live pipeline (0 = rest, 1 = reference grip)
-drives the tendon motor through the EMG position controllers in `source/controllers.py`
-(proportional or threshold), in Dynamixel extended position mode. The settings are `MOTOR` in
-`applied_config.py`; `closed_pos` must be set first (find it with
-`python main.py --mode pos --command <ticks>`).
+With `--motor`, Emil's `ProportionalEMGController` (`source/controllers.py`) moves the
+finger between `OPEN_POS` and `CLOSED_POS` (in `settings.py`) in Dynamixel extended position
+mode. `source/motor.py` runs it in its own thread and decides what it gets:
 
-```bat
-.venv\Scripts\python.exe run_emg.py --source trigno --motor
-.venv\Scripts\python.exe run_emg.py --source synthetic --motor   (bench test without EMG sensors)
-```
+- `DISARMED` (not calibrated yet): 0, the finger stays open.
+- `IDLE` (no grasp): 0, so rest activity such as rest tremor does not move the finger.
+- `GRASP_ARMED`: the grasp activation, so the finger follows the grip.
+- `STIFFENED` (tremor during a grasp): the mean grasp of the second before the tremor, so
+  the finger holds its position instead of following the tremor.
+- No fresh EMG for 0.3 s: no signal; after 0.5 s more the finger opens.
 
-- The controller runs in its own thread (`source/motor_stage.py`) at `MOTOR.rate_hz`, so the
-  serial bus cannot stall EMG acquisition.
-- The finger stays open until calibration succeeds, and opens when the controller is
-  disarmed or in FAULT, and when no fresh activation arrives for `stale_s` +
-  `signal_timeout_s` (source lost).
-- On exit (window closed, `q`, Ctrl+C) the finger returns to open before anything else stops.
-- A motor or bus error stops motor control (shown in the event log); EMG acquisition goes on.
-- After calibration the controller arms only once the hand has relaxed (grasp activation at
-  most `grasp_off_threshold` for `grasp_off_time_s`; the viewer shows "relax to arm"), so a
-  reference grip that is still held does not close the finger.
-- The finger only follows the grasp activation in `GRASP_ARMED`. In `IDLE` it stays open, so
-  rest activity such as rest tremor does not move it. In `STIFFENED` (tremor during a grasp)
-  it holds the position of the mean grasp activation over `hold_window_s` before the tremor
-  was detected, instead of following the tremor-modulated activation.
-- The stiffness command is not sent to the motor yet.
-- The tendon motor runs in extended position mode, so `open_pos`/`closed_pos` may cross the
-  0/4095 wrap; only `motor_id` is touched, other motors on the bus are left alone.
-- To test tremor handling on real EMG, `add_tremor.py` lays synthetic tremor over a recorded
-  session (see its `--help`); replay the result with `--source recorded --file <folder>`.
+On exit (window closed, `q`, Ctrl+C, end of `--duration`) the finger opens before anything
+else stops. A motor error stops only the motor; the EMG goes on. Only motor `MOTOR_ID` is
+touched. The start is refused, with torque off, if the motor is far outside the
+open-closed range.
 
 ## Testing
 
-The test scripts create a `.venv`, install the dev dependencies from `requirements-dev.txt`, and then run flake8, pylint, mypy and pytest.
-
-Windows:
+The test scripts create a `.venv`, install the dev dependencies from
+`requirements-dev.txt`, and run flake8, pylint, mypy and pytest. Emil's motor code
+(`source/controllers.py`, `source/DynamixelHardwareInterface.py`) is used as it is and is
+not linted.
 
 ```bat
 test.bat
 ```
 
-Linux / macOS:
-
 ```bash
 ./test.sh
 ```
 
-Set the `PYTHON` environment variable to pick the interpreter used to create the virtualenv (default: `py -3` on Windows, `python3` on Linux).
+Set the `PYTHON` environment variable to pick the interpreter used to create the
+virtualenv (default: `py -3` on Windows, `python3` on Linux).
 
 ## Project structure
 
 ```
-run_emg.py                   Entry point: acquire EMG and show it live
-applied_config.py            The settings in use (channels, Trigno, filters, view window)
-main_sensor.py               Offline analysis plots of the recorded dataset
+run_emg.py                   Command line: source, pipeline, window or status lines, motor
+settings.py                  All settings as plain constants
+main.py, main_controller.py  Emil's motor tools (one command; bench test of the controllers)
 source/
-  config.py                  Configuration blueprint: setting types, defaults, validation
-  emg_source.py              EMGSource interface, EMGBlock, source errors (all sources)
-  sensor_mock.py             SyntheticSource, RecordedSource (no hardware)
-  trigno.py                  TrignoSource: Delsys Trigno Control Utility TCP/IP client
-  mock_tcu.py                Mock TCU server for tests and demos (not hardware)
-  streaming.py               Causal, stateful multi-channel filtering and envelopes
-  activation.py              Calibration (rest + reference grip) and normalized activation
-  controller.py              State machine DISARMED/IDLE/GRASP_ARMED/STIFFENED -> stiffness
-  motor_stage.py             Motor thread: grasp activation -> EMG position controller -> Dynamixel
-  control_stage.py           Runs calibration, activation and controller per block
-  acquisition.py             Acquisition thread, ring buffers, CSV recording
-  session.py                 Measurement session folders (emg.csv + session.json)
-  calibration.py             Amplitude calibration (placeholder, not used yet)
-  viewer.py                  Live matplotlib viewer and console status
-  import_data.py             Dataset loading (offline)
-  process_signal.py          Offline (zero-phase) analysis and filter replication
-  visualize_data.py          Offline plots
-tests/                       pytest suite (sources, mock TCU, filters, acquisition, CLI)
+  trigno.py                  TrignoSource: talks to the Trigno Control Utility over TCP
+  mock_tcu.py                MockTCU: a fake TCU that plays a recording (tests, demos)
+  recording.py               Session folders: SessionWriter, Recording, RecordedSource
+  signal_processing.py       Filters and envelopes, block by block
+  calibration.py             Calibration (rest + grip), the calibration file, activation
+  stiffness_controller.py    State machine DISARMED/IDLE/GRASP_ARMED/STIFFENED -> stiffness
+  pipeline.py                Pipeline (what happens to every block) and the Acquisition thread
+  motor.py                   GraspSignal, MotorThread, connect_motor
+  viewer.py                  The live window and the status line
+  controllers.py             Emil's EMG position controllers
+  DynamixelHardwareInterface.py  Emil's Dynamixel interface
+measurements/                Recordings and calibrations used by the commands in kommandoer.txt
+tests/                       pytest suite
 ```
 
-Data flow: EMG source → acquisition thread (filtering, gap detection, optional CSV
-recording, then calibration → activation → controller) → ring buffers holding the last
-5 s → live viewer.
+Data flow:
+
+```
+TrignoSource / RecordedSource -> Acquisition thread -> Pipeline.step(block)
+    -> SignalProcessor -> Calibrator / compute_activation -> StiffnessController
+    -> (viewer reads Pipeline.recent())    (motor thread reads Pipeline.state and .activation)
+```
 
 ## How the project works
 _To be written._
