@@ -1,310 +1,135 @@
 """
-A stand-in for the Delsys Trigno Control Utility (TCU) SDK server, for tests
-and for demonstrating the Trigno backend without hardware.
+A fake Trigno Control Utility, for tests and for trying run_emg.py without the hardware.
 
-It implements only the documented subset of MAN-025-3-5 that
-source/trigno.py uses: the command port with the replies from the guide's
-appendix, and the EMG Data port streaming 16 multiplexed float32 channels per
-sample in 13.5 ms frames. It is NOT a model of the real TCU's timing,
-buffering or error behavior and does not prove hardware compatibility.
+It answers the commands source/trigno.py sends, the way the real TCU 3.6.0 did
+on the bench, and streams a recording (in volts) on the EMG port in 13.5 ms
+frames of 27 samples, starting over at the end. It does not model the real
+TCU's timing or errors.
 """
 
 import socket
 import threading
 import time
-from collections.abc import Callable
-from dataclasses import dataclass, field
 
 import numpy as np
-from numpy.typing import NDArray
 
-# Generates EMG in volts: (first_sample_index, n_samples) -> (n_sensors, n_samples)
-SignalFunction = Callable[[int, int], NDArray[np.float64]]
-
-
-@dataclass
-class MockSensor:
-    """
-    One paired sensor slot. position is the 0-based column of its EMG channel
-    in the 16-channel port buffer; STARTINDEX? reports position + the
-    settings' start_index_base.
-    """
-
-    slot: int
-    position: int
-    paired: bool = True
-    active: bool = True
-    units: str = "V"  # TCU 3.6.0 reply (the SDK appendix example shows "Volts")
-    sensor_type: str = "O"  # SDK section 7: Trigno Avanti sensor = type "O"
-
-
-@dataclass
-class MockTCUSettings:  # pylint: disable=too-many-instance-attributes
-    """Behavior of the mock server."""
-
-    sensors: list[MockSensor] = field(default_factory=list)
-    backwards_compatibility: bool = True
-    upsampling: bool = True
-    frame_interval_s: float = 0.0135
-    samples_per_frame: int = 27  # 27 / 0.0135 s = 2000 Hz
-    endianness: str = "LITTLE"
-    channels_on_port: int = 16
-    realtime: bool = True
-    fragment_sizes: tuple[
-        int, ...
-    ] = ()  # if set, frames are sent in chunks of these sizes (cycled)
-    max_frames: int | None = None
-    start_index_base: int = 1  # what STARTINDEX? adds to the 0-based position (TCU 3.6.0: 1)
-    banner: str = "Mock Trigno SDK server (documented protocol subset)"
-
-
-def _zero_signal(_first: int, n_samples: int, n_sensors: int) -> NDArray[np.float64]:
-    return np.zeros((n_sensors, n_samples))
+FRAME_SAMPLES = 27
+FRAME_SECONDS = 0.0135  # 27 samples per 13.5 ms = 2000 Hz
+COLUMNS = 16
 
 
 class MockTCU:  # pylint: disable=too-many-instance-attributes
-    """Threaded mock server. Use as a context manager or call start()/stop()."""
+    """Serves the command port and the EMG port on two free local ports."""
 
-    def __init__(
-        self,
-        settings: MockTCUSettings,
-        signal: SignalFunction | None = None,
-        host: str = "127.0.0.1",
-        command_port: int = 0,
-        emg_port: int = 0,
-    ) -> None:
-        self.settings = settings
-        self.signal = signal
-        self.host = host
-        self._requested_ports = (command_port, emg_port)
-        self.command_port = 0
-        self.emg_port = 0
-        self.received_commands: list[str] = []
-        self.frames_sent = 0
-        self._command_server: socket.socket | None = None
-        self._data_server: socket.socket | None = None
-        self._data_client: socket.socket | None = None
-        self._threads: list[threading.Thread] = []
-        self._stop = threading.Event()
-        self._streaming = threading.Event()
-        self._paused = threading.Event()
-        self._lock = threading.Lock()
+    def __init__(self, slots: list[int], signal_volts: np.ndarray) -> None:
+        self.slots = slots  # the paired slots; slot n is in column n - 1 of the EMG port
+        self.signal = signal_volts  # (len(slots), n) in volts
+        self.commands: list[str] = []  # every command received, for tests
+        self.streaming = False
+        self.running = True
+        self.command_server = self.listen()
+        self.data_server = self.listen()
+        self.command_port = self.command_server.getsockname()[1]
+        self.emg_port = self.data_server.getsockname()[1]
+        self.threads = [threading.Thread(target=self.serve_commands, daemon=True),
+                        threading.Thread(target=self.serve_data, daemon=True)]
 
-    # -- lifecycle ---------------------------------------------------------
-
-    def start(self) -> "MockTCU":
-        """Bind both ports and start serving."""
-        self._command_server = self._listen(self._requested_ports[0])
-        self._data_server = self._listen(self._requested_ports[1])
-        self.command_port = self._command_server.getsockname()[1]
-        self.emg_port = self._data_server.getsockname()[1]
-        for target in (self._serve_commands, self._accept_data, self._stream):
-            thread = threading.Thread(
-                target=target, daemon=True, name=f"mock-tcu-{target.__name__}"
-            )
-            thread.start()
-            self._threads.append(thread)
-        return self
-
-    def _listen(self, port: int) -> socket.socket:
+    @staticmethod
+    def listen() -> socket.socket:
+        """A server socket on a free local port."""
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((self.host, port))
+        server.bind(("127.0.0.1", 0))
         server.listen(1)
         server.settimeout(0.1)
         return server
 
+    def start(self) -> None:
+        """Start serving."""
+        for thread in self.threads:
+            thread.start()
+
     def stop(self) -> None:
-        """Stop serving and close every socket."""
-        self._stop.set()
-        self._streaming.clear()
-        for sock in (self._command_server, self._data_server, self._data_client):
-            if sock is not None:
-                try:
-                    sock.close()
-                except OSError:
-                    pass
-        for thread in self._threads:
+        """Stop serving and close the ports."""
+        self.running = False
+        for thread in self.threads:
             thread.join(timeout=2.0)
+        self.command_server.close()
+        self.data_server.close()
 
-    def __enter__(self) -> "MockTCU":
-        return self.start()
-
-    def __exit__(self, *_exc: object) -> None:
-        self.stop()
-
-    # -- fault injection ---------------------------------------------------
-
-    def drop_data_connection(self) -> None:
-        """Close the EMG data connection, as if the TCU or USB link went away."""
-        with self._lock:
-            if self._data_client is not None:
-                try:
-                    self._data_client.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-                self._data_client.close()
-                self._data_client = None
-
-    def pause_stream(self, paused: bool) -> None:
-        """Stop or resume sending data without closing the connection."""
-        if paused:
-            self._paused.set()
-        else:
-            self._paused.clear()
-
-    @property
-    def streaming(self) -> bool:
-        """True between START and STOP."""
-        return self._streaming.is_set()
-
-    # -- command port ------------------------------------------------------
-
-    def _reply(self, command: str) -> str:  # pylint: disable=too-many-return-statements
-        settings = self.settings
-        words = command.upper().split()
-        if command.upper() == "BACKWARDS COMPATIBILITY?":
-            return "YES" if settings.backwards_compatibility else "NO"
-        if command.upper() == "UPSAMPLING?":
-            return "UPSAMPLING ON" if settings.upsampling else "UPSAMPLING OFF"
-        if command.upper() == "FRAME INTERVAL?":
-            return f"{settings.frame_interval_s}"
-        if command.upper() == "MAX SAMPLES EMG?":
-            return str(settings.samples_per_frame)
-        if command.upper() == "ENDIANNESS?":
-            return settings.endianness
-        if command.upper() == "BASE FIRMWARE?":
-            return "Firmware:  MOCK"
-        if command.upper() == "START":
-            self._streaming.set()
+    def reply(self, command: str) -> str:  # pylint: disable=too-many-return-statements
+        """The TCU's answer to one command."""
+        command = command.upper()
+        words = command.split()
+        if command == "START":
+            self.streaming = True
             return "OK"
-        if command.upper() in ("STOP", "QUIT"):
-            self._streaming.clear()
+        if command in ("STOP", "QUIT"):
+            self.streaming = False
             return "OK"
-        if len(words) >= 3 and words[0] == "SENSOR" and words[1].isdigit():
-            return self._sensor_reply(int(words[1]), " ".join(words[2:]))
+        fixed = {"BACKWARDS COMPATIBILITY?": "YES", "UPSAMPLING?": "UPSAMPLING ON",
+                 "FRAME INTERVAL?": "0.0135", "MAX SAMPLES EMG?": "17", "ENDIANNESS?": "LITTLE"}
+        if command in fixed:
+            return fixed[command]
+        if len(words) >= 3 and words[0] == "SENSOR":
+            slot, question = int(words[1]), " ".join(words[2:])
+            if question == "PAIRED?":
+                return "YES" if slot in self.slots else "NO"
+            answers = {"EMGCHANNELCOUNT?": "1", "STARTINDEX?": str(slot), "CHANNEL 1 UNITS?": "V"}
+            return answers.get(question, "INVALID COMMAND")
         return "INVALID COMMAND"
 
-    def _sensor_reply(self, slot: int, query: str) -> str:
-        sensor = next((s for s in self.settings.sensors if s.slot == slot), None)
-        if query == "PAIRED?":
-            return "YES" if sensor is not None and sensor.paired else "NO"
-        if sensor is None:
-            return "INVALID COMMAND"
-        replies = {
-            "ACTIVE?": "YES" if sensor.active else "NO",
-            "EMGCHANNELCOUNT?": "1",
-            "STARTINDEX?": str(sensor.position + self.settings.start_index_base),
-            "TYPE?": sensor.sensor_type,
-            "CHANNEL 1 UNITS?": sensor.units,
-        }
-        return replies.get(query, "INVALID COMMAND")
-
-    def _serve_commands(self) -> None:
-        assert self._command_server is not None
-        while not self._stop.is_set():
+    def serve_commands(self) -> None:
+        """Answer commands from one client at a time."""
+        while self.running:
             try:
-                client, _ = self._command_server.accept()
-            except (socket.timeout, OSError):
+                client, _ = self.command_server.accept()
+            except (TimeoutError, OSError):
                 continue
             with client:
                 client.settimeout(0.1)
-                self._handle_command_client(client)
-
-    def _handle_command_client(self, client: socket.socket) -> None:
-        client.sendall(f"{self.settings.banner}\r\n\r\n".encode("ascii"))
-        buffer = b""
-        while not self._stop.is_set():
-            try:
-                chunk = client.recv(4096)
-            except socket.timeout:
-                continue
-            except OSError:
-                return
-            if not chunk:
-                self._streaming.clear()
-                return
-            buffer += chunk
-            # SDK 6.2: commands are processed when a packet ends with two CR LF
-            while b"\r\n\r\n" in buffer:
-                packet, buffer = buffer.split(b"\r\n\r\n", 1)
-                for line in packet.decode("ascii").split("\r\n"):
-                    if not line.strip():
+                client.sendall(b"Mock Trigno Control Utility\r\n\r\n")
+                buffer = b""
+                while self.running:
+                    try:
+                        chunk = client.recv(4096)
+                    except TimeoutError:
                         continue
-                    self.received_commands.append(line.strip())
-                    client.sendall(f"{self._reply(line.strip())}\r\n\r\n".encode("ascii"))
-                    if line.strip().upper() == "QUIT":
-                        return
+                    if not chunk:
+                        break
+                    buffer += chunk
+                    while b"\r\n\r\n" in buffer:
+                        packet, buffer = buffer.split(b"\r\n\r\n", 1)
+                        command = packet.decode("ascii").strip()
+                        self.commands.append(command)
+                        client.sendall(f"{self.reply(command)}\r\n\r\n".encode("ascii"))
 
-    # -- data port ---------------------------------------------------------
-
-    def _accept_data(self) -> None:
-        assert self._data_server is not None
-        while not self._stop.is_set():
-            try:
-                client, _ = self._data_server.accept()
-            except (socket.timeout, OSError):
-                continue
-            with self._lock:
-                if self._data_client is not None:
-                    self._data_client.close()
-                self._data_client = client
-
-    def _frame_bytes(self, first_index: int) -> bytes:
-        settings = self.settings
-        n = settings.samples_per_frame
-        frame = np.zeros((n, settings.channels_on_port), dtype=np.float32)
-        if settings.sensors:
-            if self.signal is not None:
-                values = self.signal(first_index, n)
-            else:
-                values = _zero_signal(first_index, n, len(settings.sensors))
-            for row, sensor in enumerate(settings.sensors):
-                frame[:, sensor.position] = values[row]
-        byte_order = "<" if settings.endianness == "LITTLE" else ">"
-        return frame.astype(np.dtype(f"{byte_order}f4")).tobytes()
-
-    def _send(self, payload: bytes) -> bool:
-        with self._lock:
-            client = self._data_client
-        if client is None:
-            return False
-        sizes = self.settings.fragment_sizes
-        try:
-            if not sizes:
-                client.sendall(payload)
-            else:
-                position, i = 0, 0
-                while position < len(payload):
-                    size = max(1, sizes[i % len(sizes)])
-                    client.sendall(payload[position : position + size])
-                    position += size
-                    i += 1
-        except OSError:
-            return False
-        return True
-
-    def _stream(self) -> None:
+    def serve_data(self) -> None:
+        """Stream the signal to the EMG port client while streaming is on."""
+        client = None
+        position = 0
         next_time = time.monotonic()
-        sample_index = 0
-        while not self._stop.is_set():
-            if not self._streaming.is_set() or self._paused.is_set():
+        while self.running:
+            if client is None:
+                try:
+                    client, _ = self.data_server.accept()
+                except (TimeoutError, OSError):
+                    continue
+            if not self.streaming:
                 time.sleep(0.005)
                 next_time = time.monotonic()
                 continue
-            limit = self.settings.max_frames
-            if limit is not None and self.frames_sent >= limit:
-                time.sleep(0.005)
+            frame = np.zeros((FRAME_SAMPLES, COLUMNS), dtype="<f4")
+            columns = np.arange(position, position + FRAME_SAMPLES) % self.signal.shape[1]
+            for row, slot in enumerate(self.slots):
+                frame[:, slot - 1] = self.signal[row, columns]
+            position += FRAME_SAMPLES
+            try:
+                client.sendall(frame.tobytes())
+            except OSError:
+                client = None
                 continue
-            if self._send(self._frame_bytes(sample_index)):
-                sample_index += self.settings.samples_per_frame
-                self.frames_sent += 1
-            else:
-                time.sleep(0.002)  # no data client connected yet
-            if self.settings.realtime:
-                next_time += self.settings.frame_interval_s
-                delay = next_time - time.monotonic()
-                if delay > 0:
-                    time.sleep(delay)
-                else:
-                    next_time = time.monotonic()
+            next_time += FRAME_SECONDS
+            time.sleep(max(0.0, next_time - time.monotonic()))
+        if client is not None:
+            client.close()

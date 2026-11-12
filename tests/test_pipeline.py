@@ -1,5 +1,6 @@
 """The per-block pipeline in source/pipeline.py: calibrate, arm after relaxing, recalibrate."""
 
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -7,11 +8,13 @@ import numpy as np
 import settings
 from source.calibration import Calibration
 from source.pipeline import Pipeline
+from source.recording import RecordedSource
 from source.signal_processing import EMGBlock
 from source.stiffness_controller import State
 from tests.fakes import RATE, make_emg
 
 CHANNELS = settings.CHANNELS
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def feed(pipeline: Pipeline, signal: np.ndarray, start_index: int = 0) -> None:
@@ -41,6 +44,26 @@ def test_a_saved_calibration_is_used_and_arms_after_relaxing(tmp_path: Path) -> 
     feed(pipeline, make_emg([(0.5, 0.01)]))
     assert pipeline.state == State.IDLE
     assert any(text.startswith("Using the saved calibration") for _, text in pipeline.messages)
+
+
+def test_the_bench_recording_gives_the_same_states_as_before(tmp_path: Path) -> None:
+    """
+    Replaying the committed recording with synthetic tremor gives exactly the state changes
+    of the code before the simplification (sample number at the end of the block, new state).
+    """
+    calibration = tmp_path / "calibration.json"
+    shutil.copy(ROOT / "calibration_replay.json", calibration)
+    folder = ROOT / "measurements" / "20261105-144738_trigno_to-lange-greb_tremor"
+    source = RecordedSource(folder, loop=False, realtime=False)
+    pipeline = Pipeline(source.channels, source.sample_rate, calibration)
+    changes = []
+    while (block := source.read_block()) is not None:
+        pipeline.step(block)
+        if not changes or changes[-1][1] != pipeline.state.value:
+            changes.append((block.first_index + block.samples.shape[1], pipeline.state.value))
+    assert changes == [(27, "DISARMED"), (648, "IDLE"), (16011, "GRASP_ARMED"),
+                       (17415, "STIFFENED"), (22950, "IDLE"), (32751, "GRASP_ARMED"),
+                       (36504, "IDLE")]
 
 
 def test_recalibrate_disarms_and_starts_over() -> None:
