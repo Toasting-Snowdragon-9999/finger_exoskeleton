@@ -18,7 +18,7 @@ FRAME_SECONDS = 0.0135  # 27 samples per 13.5 ms = 2000 Hz
 COLUMNS = 16
 
 
-class MockTCU:  # pylint: disable=too-many-instance-attributes
+class MockTCU:
     """Serves the command port and the EMG port on two free local ports."""
 
     def __init__(self, slots: list[int], signal_volts: np.ndarray) -> None:

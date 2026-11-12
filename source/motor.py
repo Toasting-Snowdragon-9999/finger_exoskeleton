@@ -21,8 +21,11 @@ both sides of the 0/4095 wrap. Only motor MOTOR_ID is touched.
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
+from typing import Any
 
 import settings
+from source.pipeline import Pipeline
 from source.stiffness_controller import State
 
 TICKS_PER_TURN = 4096
@@ -31,7 +34,7 @@ TICKS_PER_TURN = 4096
 class GraspSignal:
     """The grasp signal for the motor controller; see the top of this file."""
 
-    def __init__(self, pipeline, clock=time.monotonic) -> None:
+    def __init__(self, pipeline: Pipeline, clock: Callable[[], float] = time.monotonic) -> None:
         self.pipeline = pipeline
         self.clock = clock
         self.history: deque = deque()  # (time, grasp) during the current grasp
@@ -66,7 +69,9 @@ class GraspSignal:
 class MotorThread:
     """Runs the motor controller's loop in its own thread."""
 
-    def __init__(self, controller, signal: GraspSignal, message=print) -> None:
+    def __init__(self, controller: Any, signal: GraspSignal,
+                 message: Callable[[str], None] = print) -> None:
+        # controller: a ProportionalEMGController from source/controllers.py
         self.controller = controller
         self.signal = signal
         self.message = message
@@ -102,16 +107,17 @@ def turn_shift(present: int, open_pos: int, closed_pos: int) -> int:
     return round((present - middle) / TICKS_PER_TURN) * TICKS_PER_TURN
 
 
-def connect_motor(port: str, motors_class=None):
+def connect_motor(port: str, motors_class: Any = None) -> tuple[Any, Any]:
     """
     Connect to the tendon motor and build the controller. Returns (motors, controller);
     close motors after the controller has stopped.
     """
     # Imported here so the EMG side works without the Dynamixel SDK installed
-    from source.controllers import ProportionalEMGController  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from source.controllers import ProportionalEMGController
 
     if motors_class is None:
-        from source.DynamixelHardwareInterface import Motors  # pylint: disable=import-outside-toplevel
+        from source.DynamixelHardwareInterface import Motors
         motors_class = Motors
     motors = motors_class(port=port, baudrate=settings.MOTOR_BAUDRATE, init_mode=None)
     motor_id = settings.MOTOR_ID

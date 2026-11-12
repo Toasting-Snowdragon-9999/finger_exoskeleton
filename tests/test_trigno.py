@@ -24,7 +24,7 @@ def test_reads_the_configured_slots_in_mv() -> None:
         source.start()
         assert source.sample_rate == 2000.0
         assert source.columns == [14, 13]
-        samples = []
+        samples: list[np.ndarray] = []
         while sum(block.shape[1] for block in samples) < 100:
             samples.append(source.read_block().samples)
         received = np.concatenate(samples, axis=1)[:, :100]

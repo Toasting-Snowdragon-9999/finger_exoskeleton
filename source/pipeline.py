@@ -27,8 +27,10 @@ import settings
 from settings import Channel
 from source.calibration import Activation, Calibration, Calibrator, compute_activation
 from source.calibration import load_calibration
+from source.recording import RecordedSource, SessionWriter
 from source.signal_processing import EMGBlock, SignalProcessor
 from source.stiffness_controller import HoldTimer, State, StiffnessController
+from source.trigno import TrignoSource
 
 
 class Pipeline:  # pylint: disable=too-many-instance-attributes
@@ -157,7 +159,10 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
             self.calibration = result
             self.waiting_to_arm = True
             self.relax_timer.reset()
-            start = "Using the saved calibration" if self.loaded_calibration else "Calibration complete"
+            if self.loaded_calibration:
+                start = "Using the saved calibration"
+            else:
+                start = "Calibration complete"
             self.message(f"{start}; relax the hand to arm the controller")
             levels = " ".join(f"{name} {rest * 1000:.0f}/{grip * 1000:.0f}" for name, rest, grip
                               in zip(self.names, result.rest_slow, result.reference_slow))
@@ -193,10 +198,11 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
 class Acquisition:
     """Reads blocks from a source in a background thread and feeds them to the pipeline."""
 
-    def __init__(self, source, pipeline: Pipeline, session=None) -> None:
+    def __init__(self, source: RecordedSource | TrignoSource, pipeline: Pipeline,
+                 session: SessionWriter | None = None) -> None:
         self.source = source
         self.pipeline = pipeline
-        self.session = session  # a SessionWriter (source/recording.py) or None
+        self.session = session  # records the raw EMG with --out
         self.error: str | None = None
         self.stop_requested = False
         self.thread = threading.Thread(target=self.loop, name="acquisition", daemon=True)

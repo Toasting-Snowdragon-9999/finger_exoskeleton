@@ -59,7 +59,8 @@ class SessionWriter:
         self.sample_rate = sample_rate
         self.samples = 0
         self.last_flush = time.monotonic()
-        self.file = open(folder / EMG_FILE, "w", newline="", encoding="utf-8")  # pylint: disable=consider-using-with
+        # pylint: disable-next=consider-using-with  # closed in finish()
+        self.file = open(folder / EMG_FILE, "w", newline="", encoding="utf-8")
         self.writer = csv.writer(self.file)
         self.writer.writerow(["time_s"] + [f"{channel.name}_mV" for channel in channels])
         self.metadata = {

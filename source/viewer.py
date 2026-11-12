@@ -8,6 +8,8 @@ LiveViewer shows, about ten times per second:
 Keys: c = calibrate again, q = quit.
 """
 
+from typing import Any
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
@@ -85,7 +87,7 @@ class LiveViewer:
         self.figure.canvas.mpl_connect("key_press_event", self.on_key)
         self.animation: FuncAnimation | None = None
 
-    def on_key(self, event) -> None:
+    def on_key(self, event: Any) -> None:
         """c: calibrate again, q: quit."""
         if event.key == "c":
             self.pipeline.recalibrate()

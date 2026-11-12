@@ -31,7 +31,7 @@ def calibrate(grip: float) -> Calibrator:
 def test_calibration_finds_rest_and_grip_levels() -> None:
     """Rest is the mean of the rest window, grip the 95th percentile of the grip window."""
     calibrator = calibrate(grip=0.1)
-    assert calibrator.error is None and calibrator.phase == "done"
+    assert calibrator.result is not None and calibrator.phase == "done"
     assert np.allclose(calibrator.result.rest_slow, 0.01)
     assert np.allclose(calibrator.result.reference_slow, 0.1)
 
@@ -40,7 +40,7 @@ def test_a_weak_grip_fails() -> None:
     """A grip below 3x the rest level is not accepted."""
     calibrator = calibrate(grip=0.02)
     assert calibrator.result is None
-    assert "not at least 3x" in calibrator.error
+    assert calibrator.error is not None and "not at least 3x" in calibrator.error
 
 
 def make_calibration() -> Calibration:

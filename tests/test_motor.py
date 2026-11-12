@@ -1,6 +1,7 @@
 """The grasp signal and the motor connection in source/motor.py, with a fake motor."""
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -11,12 +12,12 @@ from source.stiffness_controller import State
 from tests.fakes import FakeMotors
 
 
-def fake_pipeline(state: State, grasp: float = 0.6, received: float = 100.0) -> SimpleNamespace:
+def fake_pipeline(state: State, grasp: float = 0.6, received: float = 100.0) -> Any:
     """Something with the two attributes GraspSignal reads: state and activation."""
     return SimpleNamespace(state=state, activation=Activation(grasp, 0.0, 0.0, received))
 
 
-def signal_for(pipeline: SimpleNamespace, now: float = 100.0) -> GraspSignal:
+def signal_for(pipeline: Any, now: float = 100.0) -> GraspSignal:
     """A GraspSignal whose clock reads `now`."""
     return GraspSignal(pipeline, clock=lambda: now)
 
@@ -76,7 +77,7 @@ def test_connect_sets_only_the_tendon_motor_to_extended_mode() -> None:
 
 def test_connect_shifts_the_range_to_the_motors_turn() -> None:
     """A motor counted one turn further gets open and closed one turn further too."""
-    def one_turn_on(**kwargs) -> FakeMotors:
+    def one_turn_on(**kwargs: Any) -> FakeMotors:
         return FakeMotors(position=4600 + 4096, **kwargs)
 
     _, controller = connect_motor("COM0", motors_class=one_turn_on)
@@ -85,9 +86,9 @@ def test_connect_shifts_the_range_to_the_motors_turn() -> None:
 
 def test_connect_refuses_a_motor_far_outside_the_range() -> None:
     """Far outside open-closed the start is refused, with torque left off."""
-    made = []
+    made: list[FakeMotors] = []
 
-    def far_away(**kwargs) -> FakeMotors:
+    def far_away(**kwargs: Any) -> FakeMotors:
         made.append(FakeMotors(position=settings.CLOSED_POS - 1000, **kwargs))
         return made[0]
 

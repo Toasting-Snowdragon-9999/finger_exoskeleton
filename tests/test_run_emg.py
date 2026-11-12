@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -29,7 +30,7 @@ def test_motor_ends_open(monkeypatch: pytest.MonkeyPatch) -> None:
     """With --motor the motor runs during the replay and is back at open at the end."""
     made: list[FakeMotors] = []
 
-    def fake_motors(**kwargs) -> FakeMotors:
+    def fake_motors(**kwargs: Any) -> FakeMotors:
         made.append(FakeMotors(**kwargs))
         return made[0]
 

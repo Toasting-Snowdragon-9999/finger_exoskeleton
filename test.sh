@@ -25,7 +25,7 @@ run() {
 
 run flake8 .
 run pylint source tests
-run pylint run_emg.py applied_config.py
+run pylint run_emg.py settings.py
 run mypy
 run pytest
 

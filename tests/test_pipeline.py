@@ -56,7 +56,7 @@ def test_the_bench_recording_gives_the_same_states_as_before(tmp_path: Path) -> 
     folder = ROOT / "measurements" / "20261105-144738_trigno_to-lange-greb_tremor"
     source = RecordedSource(folder, loop=False, realtime=False)
     pipeline = Pipeline(source.channels, source.sample_rate, calibration)
-    changes = []
+    changes: list[tuple[int, str]] = []
     while (block := source.read_block()) is not None:
         pipeline.step(block)
         if not changes or changes[-1][1] != pipeline.state.value:

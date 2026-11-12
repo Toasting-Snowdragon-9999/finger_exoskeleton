@@ -1,4 +1,5 @@
 [flake8]
 max-line-length = 100
-exclude = .git,__pycache__,.venv,venv,build,dist,.mypy_cache,.pytest_cache
+# Emil's motor code (source/controllers.py, source/DynamixelHardwareInterface.py) is used as it is
+exclude = .git,__pycache__,.venv,venv,build,dist,.mypy_cache,.pytest_cache,controllers.py,DynamixelHardwareInterface.py
 extend-ignore = E203

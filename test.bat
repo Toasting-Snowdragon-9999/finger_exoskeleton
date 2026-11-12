@@ -23,7 +23,7 @@ echo ==^> flake8
 "%PY%" -m flake8 . || set STATUS=1
 echo ==^> pylint
 "%PY%" -m pylint source tests || set STATUS=1
-"%PY%" -m pylint run_emg.py applied_config.py || set STATUS=1
+"%PY%" -m pylint run_emg.py settings.py || set STATUS=1
 echo ==^> mypy
 "%PY%" -m mypy || set STATUS=1
 echo ==^> pytest

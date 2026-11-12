@@ -23,26 +23,37 @@ addopts = "-ra"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["run_emg.py", "applied_config.py", "source", "tests"]
-strict = true
+files = ["run_emg.py", "settings.py", "source", "tests"]
+# Every function has type hints, but plain ones (np.ndarray, dict) are fine
+disallow_untyped_defs = true
+explicit_package_bases = true
+ignore_missing_imports = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# Emil's motor code is used as it is
+module = ["source.controllers", "source.DynamixelHardwareInterface", "dynamixel_sdk"]
+ignore_errors = true
+follow_imports = "skip"
 
 [tool.pylint.main]
 py-version = "3.12"
 ignore-paths = ["^\\.venv/.*$"]
+# Emil's motor code is used as it is
+ignore = ["controllers.py", "DynamixelHardwareInterface.py"]
 
 [tool.pylint.format]
 max-line-length = 100
 
 [tool.pylint.design]
-# Configuration dataclasses and pipeline components carry many settings
-max-attributes = 20
+max-attributes = 15
 max-args = 7
 max-positional-arguments = 7
-max-branches = 15
 max-locals = 20
+max-branches = 15
 
 [tool.pylint."messages control"]
 disable = [
     "missing-module-docstring",
+    "too-few-public-methods",
 ]

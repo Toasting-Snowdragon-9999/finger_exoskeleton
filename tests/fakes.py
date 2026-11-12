@@ -62,7 +62,8 @@ class FakeMotors:
         assert motor_id == settings.MOTOR_ID
         return self.position
 
-    def sendMotorCommand(self, motor_id: int, command: int) -> None:  # noqa: N802 pylint: disable=invalid-name
+    # pylint: disable-next=invalid-name  # the name Motors uses
+    def sendMotorCommand(self, motor_id: int, command: int) -> None:
         """Goal position; the fake motor is there at once."""
         assert motor_id == settings.MOTOR_ID
         self.sent.append(command)

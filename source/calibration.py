@@ -123,7 +123,8 @@ class Calibrator:
         """Seconds until the current phase ends."""
         if self.result is not None or self.error is not None:
             return 0.0
-        for end in (settings.REST_WINDOW_S[1], settings.GRIP_WINDOW_S[0], settings.GRIP_WINDOW_S[1]):
+        ends = (settings.REST_WINDOW_S[1], settings.GRIP_WINDOW_S[0], settings.GRIP_WINDOW_S[1])
+        for end in ends:
             if self.time < end:
                 return end - self.time
         return 0.0
@@ -156,12 +157,16 @@ class Calibrator:
             self.error = "No samples fell inside the calibration windows"
             return
         percentile = settings.GRIP_PERCENTILE
+        rest_slow = np.concatenate(self.rest_slow, axis=1)
+        rest_fast = np.concatenate(self.rest_fast, axis=1)
+        grip_slow = np.concatenate(self.grip_slow, axis=1)
+        grip_fast = np.concatenate(self.grip_fast, axis=1)
         calibration = Calibration(
             channel_names=self.channel_names,
-            rest_slow=np.mean(np.concatenate(self.rest_slow, axis=1), axis=1),
-            reference_slow=np.percentile(np.concatenate(self.grip_slow, axis=1), percentile, axis=1),
-            rest_fast=np.mean(np.concatenate(self.rest_fast, axis=1), axis=1),
-            reference_fast=np.percentile(np.concatenate(self.grip_fast, axis=1), percentile, axis=1),
+            rest_slow=np.mean(rest_slow, axis=1),
+            reference_slow=np.percentile(grip_slow, percentile, axis=1),
+            rest_fast=np.mean(rest_fast, axis=1),
+            reference_fast=np.percentile(grip_fast, percentile, axis=1),
         )
         self.error = calibration.problem()
         if self.error is None:

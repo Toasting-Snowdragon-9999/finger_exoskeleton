@@ -2,18 +2,18 @@
 
 import numpy as np
 
-from source.signal_processing import EMGBlock, MovingRMS, SignalProcessor
+from source.signal_processing import EMGBlock, MovingRMS, ProcessedBlock, SignalProcessor
 from tests.fakes import RATE, make_emg
 
 
-def process_all(signal: np.ndarray, block_size: int = 27):
+def process_all(signal: np.ndarray, block_size: int = 27) -> list[ProcessedBlock]:
     """Process a (n_channels, n) signal in blocks; returns the list of processed blocks."""
     processor = SignalProcessor(signal.shape[0], RATE)
     return [processor.process(EMGBlock(signal[:, start:start + block_size], start, 0.0))
             for start in range(0, signal.shape[1], block_size)]
 
 
-def joined(blocks, name: str) -> np.ndarray:
+def joined(blocks: list[ProcessedBlock], name: str) -> np.ndarray:
     """One signal of all blocks, joined in time."""
     return np.concatenate([getattr(block, name) for block in blocks], axis=1)
 

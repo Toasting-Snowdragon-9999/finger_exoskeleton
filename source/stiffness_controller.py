@@ -4,9 +4,11 @@ The stiffness controller: decides when the finger should be stiff because of tre
   DISARMED     before calibration (and while recalibrating): stiffness 0
   IDLE         --grasp >= GRASP_ON for GRASP_ON_TIME_S-->                         GRASP_ARMED
   GRASP_ARMED  --grasp < GRASP_OFF for GRASP_OFF_TIME_S-->                        IDLE
-               --tremor depth >= TREMOR_ON and ratio >= RATIO_ON for TREMOR_ON_TIME_S-->  STIFFENED
+               --tremor depth >= TREMOR_ON and ratio >= RATIO_ON
+                 for TREMOR_ON_TIME_S-->                                          STIFFENED
   STIFFENED    --grasp < GRASP_OFF for GRASP_OFF_TIME_S-->                        IDLE
-               --tremor depth < TREMOR_OFF or ratio < RATIO_OFF for TREMOR_OFF_TIME_S-->  GRASP_ARMED
+               --tremor depth < TREMOR_OFF or ratio < RATIO_OFF
+                 for TREMOR_OFF_TIME_S-->                                         GRASP_ARMED
 
 In STIFFENED the stiffness grows with the tremor depth. It rises at most
 ENGAGE_RATE_PER_S and falls at most RELEASE_RATE_PER_S. The stiffness is only

@@ -91,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     mock = None
+    source: RecordedSource | TrignoSource
     if args.source == "recorded":
         source = RecordedSource(args.file, loop=not args.no_loop)
         print(f"Replaying {args.file} at {source.sample_rate:g} Hz")

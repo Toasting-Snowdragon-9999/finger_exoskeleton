@@ -22,7 +22,7 @@ from settings import Channel
 from source.signal_processing import EMGBlock
 
 
-class TrignoSource:  # pylint: disable=too-many-instance-attributes
+class TrignoSource:
     """EMG blocks from the TCU's EMG port."""
 
     name = "trigno"
@@ -153,9 +153,9 @@ class TrignoSource:  # pylint: disable=too-many-instance-attributes
             self.data_buffer += chunk
             receive_time = time.monotonic()
         n_rows = len(self.data_buffer) // row_bytes
-        rows = np.frombuffer(self.data_buffer[:n_rows * row_bytes], dtype="<f4")
+        values = np.frombuffer(self.data_buffer[:n_rows * row_bytes], dtype="<f4")
         self.data_buffer = self.data_buffer[n_rows * row_bytes:]
-        rows = rows.reshape(n_rows, settings.TRIGNO_CHANNELS_ON_PORT)
+        rows = values.reshape(n_rows, settings.TRIGNO_CHANNELS_ON_PORT)
         samples = rows[:, self.columns].T.astype(np.float64) * 1000.0  # volts -> mV
         first = self.samples_read
         self.samples_read += n_rows
