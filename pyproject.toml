@@ -23,7 +23,7 @@ addopts = "-ra"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["main_sensor.py", "run_emg.py", "applied_config.py", "source", "tests"]
+files = ["run_emg.py", "applied_config.py", "source", "tests"]
 strict = true
 warn_unused_configs = true
 

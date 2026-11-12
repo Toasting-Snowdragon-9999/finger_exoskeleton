@@ -23,12 +23,6 @@ Optag en session (gemmes i measurements\, skift "navn"):
 Lav en ny kalibrering og gem den (hvile 0,5-3 s, så fast greb inden 10 s):
 .venv\Scripts\python.exe run_emg.py --source trigno --calibrate --calibration measurements\plac_calibration.json
 
-Sammenlign sensorplaceringer (en mappe pr. placering):
-.venv\Scripts\python.exe compare_placement.py measurements\<mappe-A> measurements\<mappe-B>
-
-Læg syntetisk tremor ind i en optagelse (ny mappe med endelsen _tremor):
-.venv\Scripts\python.exe add_tremor.py measurements\<mappe> --span 7.5-11.5 --span 15.8-18.2
-
 Se hvilke COM-porte der findes (motoren var COM5):
 .venv\Scripts\python.exe -m serial.tools.list_ports
 

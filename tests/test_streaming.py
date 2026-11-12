@@ -8,8 +8,6 @@ from numpy.typing import NDArray
 from scipy.signal import butter, sosfilt, sosfilt_zi
 
 from source.config import ProcessingConfig
-from source.import_data import EMGData
-from source.process_signal import SignalProcess
 from source.emg_source import EMGBlock
 from source.streaming import MovingRMS, StreamingFilter, StreamingProcessor, dominant_frequency
 
@@ -46,19 +44,6 @@ def test_steady_state_start_has_no_offset_transient() -> None:
     sos = butter(4, [20, 450], btype="bandpass", fs=FS, output="sos")
     output = StreamingFilter(sos, 1, steady_state_start=True).process(np.full((1, 2000), -3.0))
     assert np.max(np.abs(output)) < 1e-9
-
-
-def test_moving_rms_matches_offline_smooth_signal() -> None:
-    """The streaming RMS equals the existing offline SignalProcess.smooth_signal."""
-    rng = np.random.default_rng(1)
-    signal = rng.standard_normal((2, 3000))
-    rms = MovingRMS(2, window=200)
-    streamed = np.hstack([rms.process(block.samples) for block in blocks_of(signal, [27, 5, 333])])
-    for channel in range(2):
-        data = EMGData("x")
-        data.data = signal[channel].tolist()
-        offline = SignalProcess(data, FS).smooth_signal(window_size=200).get_data()
-        np.testing.assert_allclose(streamed[channel], offline, rtol=1e-9)
 
 
 def test_moving_rms_window_of_one_is_rectification() -> None:
