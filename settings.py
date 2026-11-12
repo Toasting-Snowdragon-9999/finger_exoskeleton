@@ -1,0 +1,109 @@
+"""
+All settings of the exoskeleton software in one place. Change the values here.
+
+Units: EMG in mV, times in seconds, frequencies in Hz, motor positions in
+raw Dynamixel ticks (4096 per turn).
+"""
+
+from dataclasses import dataclass
+
+
+@dataclass
+class Channel:
+    """One EMG sensor: its name, its muscle role ("flexor" or "extensor") and its Trigno slot."""
+
+    name: str
+    role: str
+    slot: int
+
+
+# The sensors in use. The flexor channels detect the grasp; all channels are checked for tremor.
+CHANNELS = [
+    Channel("FDS", "flexor", 15),  # underside (palm side) of the forearm
+    Channel("EDC", "extensor", 14),  # top side of the forearm
+]
+
+# --- Delsys Trigno Control Utility (TCU) ----------------------------------------------------
+TRIGNO_HOST = "127.0.0.1"  # the PC running the TCU
+TRIGNO_COMMAND_PORT = 50040
+TRIGNO_EMG_PORT = 50043  # 16 EMG channels as 32-bit floats
+TRIGNO_CHANNELS_ON_PORT = 16
+TRIGNO_CONNECT_TIMEOUT_S = 3.0
+TRIGNO_COMMAND_TIMEOUT_S = 5.0  # the TCU takes about 2.6 s to answer STOP
+TRIGNO_DATA_TIMEOUT_S = 0.5  # no EMG data for this long: a message, then keep waiting
+
+# --- Replay and live view -----------------------------------------------------------------
+BLOCK_SIZE = 27  # samples per block when replaying (one Trigno frame of 13.5 ms at 2000 Hz)
+MONITOR_SECONDS = 5.0  # seconds of EMG shown in the live view
+EMG_Y_LIMITS = (0.0, 0.15)  # fixed y range of the EMG plots in mV
+
+# --- Signal processing (see source/signal_processing.py) ----------------------------------
+BANDPASS_HZ = (20.0, 450.0)
+BANDPASS_ORDER = 4
+NOTCH_HZ = 50.0  # power line (60 Hz in the Americas)
+NOTCH_QUALITY = 30.0
+SLOW_WINDOW_S = 0.2  # moving RMS: the slow envelope (voluntary effort)
+FAST_CUTOFF_HZ = 10.0  # low-pass of the rectified EMG: the fast envelope (tremor bursts)
+TREMOR_BAND_HZ = (4.0, 6.0)  # Parkinsonian tremor
+RHYTHM_BAND_HZ = (1.0, 9.0)  # all envelope fluctuation, for the tremor ratio
+TREMOR_WINDOW_S = 0.5  # RMS window of the tremor and fluctuation amplitudes
+DEPTH_MIN_ENVELOPE_MV = 0.01  # floor of the slow envelope when computing tremor depth
+
+# --- Calibration (see source/calibration.py) ----------------------------------------------
+REST_WINDOW_S = (0.5, 3.0)  # rest during this window...
+GRIP_WINDOW_S = (3.5, 10.0)  # ...then hold a firm grip during this one
+GRIP_PERCENTILE = 95.0  # grip level = this percentile of the slow envelope in the grip window
+MIN_GRIP_RATIO = 3.0  # the grip must be at least this many times the rest level
+CALIBRATION_FILE = "calibration.json"  # default file for live Trigno runs
+
+# --- Stiffness controller (see source/stiffness_controller.py) ----------------------------
+# Grasp activation: 0 = rest, 1 = the calibration grip. Tremor is measured as tremor depth.
+GRASP_ON = 0.25
+GRASP_OFF = 0.15
+GRASP_ON_TIME_S = 0.10
+GRASP_OFF_TIME_S = 0.30  # also how long the hand must rest before the controller arms
+TREMOR_ON = 0.15
+TREMOR_OFF = 0.08
+RATIO_ON = 0.8  # tremor only counts when the fluctuation is rhythmic (ratio near 1)
+RATIO_OFF = 0.6
+TREMOR_ON_TIME_S = 0.3  # 0.05 gave false tremor on fast grips
+TREMOR_OFF_TIME_S = 0.75
+ENGAGE_STIFFNESS = 0.3  # stiffness when tremor is first detected
+STIFFNESS_GAIN = 2.0  # extra stiffness per unit of tremor depth above TREMOR_OFF
+MAX_STIFFNESS = 1.0
+ENGAGE_RATE_PER_S = 20.0
+RELEASE_RATE_PER_S = 1.5
+
+# --- Tendon motor (see source/motor.py), used with run_emg.py --motor ---------------------
+# Positions measured 2026-11-06 with torque off; only their difference and their value
+# modulo 4096 matter (the turn the motor is in is found at start).
+MOTOR_PORT = "COM5"
+MOTOR_BAUDRATE = 3000000
+MOTOR_ID = 2  # the tendon motor; other motors on the bus are left alone
+OPEN_POS = 4659
+CLOSED_POS = 2833
+MAX_SPEED = 1500.0  # ticks per second
+MOTOR_RATE_HZ = 50.0
+SIGNAL_TIMEOUT_S = 0.5  # no grasp signal for this long: the finger opens
+STALE_S = 0.3  # newest EMG older than this counts as no signal
+HOLD_WINDOW_S = 1.0  # while STIFFENED: hold the mean grasp of this long before
+DEADBAND = 0.1
+GAMMA = 1.0
+
+
+def processing_settings() -> dict:
+    """The signal processing settings, as stored in a calibration file."""
+    return {
+        "bandpass_low_hz": BANDPASS_HZ[0],
+        "bandpass_high_hz": BANDPASS_HZ[1],
+        "bandpass_order": BANDPASS_ORDER,
+        "notch_enabled": True,
+        "notch_hz": NOTCH_HZ,
+        "notch_quality": NOTCH_QUALITY,
+        "slow_window_s": SLOW_WINDOW_S,
+        "fast_cutoff_hz": FAST_CUTOFF_HZ,
+        "tremor_band_hz": list(TREMOR_BAND_HZ),
+        "tremor_window_s": TREMOR_WINDOW_S,
+        "rhythm_band_hz": list(RHYTHM_BAND_HZ),
+        "depth_min_envelope_mv": DEPTH_MIN_ENVELOPE_MV,
+    }
