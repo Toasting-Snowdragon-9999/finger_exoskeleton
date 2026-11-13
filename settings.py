@@ -20,7 +20,6 @@ class Channel:
 # The sensors in use. The flexor channels detect the grasp; all channels are checked for tremor.
 CHANNELS = [
     Channel("FDS", "flexor", 15),  # underside (palm side) of the forearm
-    Channel("EDC", "extensor", 14),  # top side of the forearm
 ]
 
 # --- Delsys Trigno Control Utility (TCU) ----------------------------------------------------
