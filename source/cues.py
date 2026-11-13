@@ -21,6 +21,9 @@ received, the same clock as time_s in emg.csv.
 
 With a start delay the whole protocol begins that much later: until then the
 cue is a countdown, and the times in labels.csv are shifted by the delay.
+
+labels.csv also keeps the cue text in a last column, so plot_recording.py can
+colour the recording by what the person was asked to do.
 """
 
 import csv
@@ -54,8 +57,11 @@ class CueProtocol:
         """Write the protocol's intention and tremor as labels.csv in a session folder."""
         with open(folder / LABELS_FILE, "w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
-            writer.writerow(["start_s", "end_s", "intention", "tremor"])
+            writer.writerow(["start_s", "end_s", "intention", "tremor", "cue"])
+            if self.start_s > 0:  # the countdown: nothing is known about this part
+                writer.writerow(["0", f"{self.start_s:g}", "", "", "VENT"])
             for row in self.rows:
                 start = float(row["start_s"]) + self.start_s
                 end = float(row["end_s"]) + self.start_s
-                writer.writerow([f"{start:g}", f"{end:g}", row["intention"], row["tremor"]])
+                writer.writerow([f"{start:g}", f"{end:g}", row["intention"], row["tremor"],
+                                 row["cue"]])

@@ -73,7 +73,8 @@ def test_cues_are_shown_and_saved_as_labels(tmp_path: Path,
     assert output.index(">>> HVIL") < output.index(">>> LUK HELT")
     (folder,) = (tmp_path / "out").iterdir()
     labels = (folder / "labels.csv").read_text().splitlines()
-    assert labels == ["start_s,end_s,intention,tremor", "0,0.6,0,0", "0.6,5,1,"]
+    assert labels == ["start_s,end_s,intention,tremor,cue", "0,0.6,0,0,HVIL",
+                      "0.6,5,1,,LUK HELT"]
 
 
 def test_cues_need_a_recording() -> None:
@@ -94,7 +95,8 @@ def test_start_delay_is_saved_and_used_again_for_a_replay(
     output = capsys.readouterr().out
     assert output.index(">>> VENT: starter om 1 s") < output.index(">>> HVIL")
     (folder,) = (tmp_path / "out").iterdir()
-    assert (folder / "labels.csv").read_text().splitlines()[1] == "0.7,5.7,0,0"
+    labels = (folder / "labels.csv").read_text().splitlines()
+    assert labels[1:] == ["0,0.7,,,VENT", "0.7,5.7,0,0,HVIL"]
     assert json.loads((folder / "session.json").read_text())["start_delay_s"] == 0.7
 
     args = run_emg.parse_args(["--source", "recorded", "--file", str(folder)])

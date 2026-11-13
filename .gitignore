@@ -217,9 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Runtime logs and calibrations
+# Runtime logs and the calibration files of single runs. The recordings in measurements/
+# ARE kept in git: they are the training data.
 logs/
-measurements/
 calibration*.json
 
 # Trained GRU models (make them again with train_gru.py)

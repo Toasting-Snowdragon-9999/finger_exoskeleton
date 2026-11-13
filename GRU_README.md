@@ -157,6 +157,25 @@ Der er tre protokoller, `protocols/greb_1.csv`, `greb_2.csv` og `greb_3.csv`, p�
 - De første 0,5 s efter hvert skift regnes som ukendt, fordi en person skal bruge lidt tid på at reagere.
 - Aktiv åbning (−1) og halvt greb (0,5) er ikke med. Motoren kan kun lukke fingeren, og et "halvt" greb kan ikke udføres ens uden en kraftmåler. Lav jeres egne protokoller ved at kopiere en af filerne.
 
+**Tjek hver optagelse, lige efter den er lavet:**
+
+```bat
+.venv\Scripts\python.exe plot_recording.py measurements\<mappe>
+```
+
+Billedet viser EMG'en for hver kanal med facit som baggrundsfarve:
+
+| Farve | Cue | Sådan skal kurven se ud |
+|---|---|---|
+| blå | HVIL | flad og lav |
+| grøn | GRIB | stiger kort efter, feltet begynder, og falder, når det slutter |
+| rød | KLEM | som grøn, men højere |
+| grå | kalibrering og ventetid | bruges ikke til træning |
+
+Kommer et greb for sent, mangler det, eller fortsætter det ind i det blå felt, er facit forkert. Lav så optagelsen om: forkert facit skader træningen mere end en manglende optagelse. `--save` gemmer billedet som `labels.png` i mappen.
+
+**Gem optagelserne i git.** Mappen `measurements/` følger med i git, så alle har de samme træningsdata: `git add measurements`, `git commit`, `git push`. Repoet er offentligt, så brug `p1`, `p2` osv. i `--label` og aldrig navne, og sørg for, at forsøgspersonerne har sagt ja til, at deres EMG ligger frit tilgængeligt. En optagelse fylder ca. 8 MB.
+
 **2. Syntetisk tremor (tremor).** `--add-synthetic-tremor` lægger kunstig 4–7 Hz-tremor oven på tremorfri optagelser, så facit er kendt præcist. Det er et hjælpemiddel til træning, ikke rigtig tremor.
 
 **3. Offentlige datasæt.** Et datasæt konverteres til én `.npz`-fil pr. optagelse med nøglerne `emg` (kanaler × samples, i mV), `sample_rate`, `roles` og eventuelt `intention`, `tremor`, `group` og `rest_level`. Filen indlæses med `--npz` og omsamples automatisk til 2000 Hz. Konverteringsscripts til Pinheiro (rigtig Parkinson-tremor) og Ninapro (EMG + datahandske) er ikke skrevet endnu: de skal laves ud fra de rigtige filer.

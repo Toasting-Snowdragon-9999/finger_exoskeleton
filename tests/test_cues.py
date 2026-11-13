@@ -52,4 +52,5 @@ def test_start_delay_shows_a_countdown_and_shifts_the_labels(tmp_path: Path) -> 
     assert protocol.cue_at(35.0).startswith("GRIB")  # 14-18 s of the protocol
     protocol.write_labels(tmp_path)
     lines = (tmp_path / "labels.csv").read_text().splitlines()
-    assert lines[1] == "20,23,," and lines[4] == "34,38,1,0"
+    assert lines[1] == "0,20,,,VENT" and lines[2] == "20,23,,,KALIBRERING: hvil hånden"
+    assert lines[5] == "34,38,1,0,GRIB objektet med normalt greb og hold"

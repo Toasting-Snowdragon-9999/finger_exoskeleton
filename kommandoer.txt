@@ -31,6 +31,16 @@ GRU (neuralt netværk i stedet for signalbehandling, se GRU_README.md). Kræver 
 Optag en session med cues (giver labels.csv til træning). Skift mellem greb_1, greb_2 og greb_3:
 .venv\Scripts\python.exe run_emg.py --source trigno --out measurements --label cue1 --cues protocols\greb_1.csv --calibration measurements\plac_calibration.json
 
+Se en optagelse med facit som farver (blå = HVIL, grøn = GRIB, rød = KLEM). Gør det efter hver optagelse:
+.venv\Scripts\python.exe plot_recording.py measurements\<mappe>
+Gem billedet som labels.png i mappen i stedet for at åbne et vindue:
+.venv\Scripts\python.exe plot_recording.py measurements\<mappe> --save
+
+Gem optagelserne i git (repoet er OFFENTLIGT: brug p1, p2 ... i --label, aldrig navne):
+git add measurements
+git commit -m "Cue-optagelser p1 hojre arm"
+git push
+
 Træn en GRU-model på mindst 3 cue-optagelser:
 .venv\Scripts\python.exe train_gru.py --sessions measurements\<mappe1> measurements\<mappe2> measurements\<mappe3> --add-synthetic-tremor
 

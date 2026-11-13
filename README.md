@@ -42,6 +42,7 @@ bench are in [kommandoer.txt](kommandoer.txt).
 | Change the 20 s wait before calibration and cues | add `--start-delay 5` |
 | Show cues and save them as labels | add `--out measurements --cues protocols\greb_1.csv` |
 | Use a trained GRU model instead of the signal processing | add `--method gru --model models\gru.pt` |
+| Look at a recording with its labels as colours | `.venv\Scripts\python.exe plot_recording.py measurements\<session folder>` |
 
 The window shows the filtered EMG of every channel with its slow envelope (effort) and fast
 envelope (tremor bursts), a controller panel (grasp activation, tremor depth and stiffness,
@@ -170,6 +171,7 @@ virtualenv (default: `py -3` on Windows, `python3` on Linux).
 run_emg.py                   Command line: source, pipeline, window or status lines, motor
 train_gru.py                 Train a GRU model (needs PyTorch, requirements-ml.txt)
 evaluate_gru.py              Test a GRU model and the DSP on recordings with labels
+plot_recording.py            Draw a recording with its labels as colours (check before training)
 settings.py                  All settings as plain constants
 main.py, main_controller.py  Emil's motor tools (one command; bench test of the controllers)
 source/
@@ -188,7 +190,7 @@ source/
   controllers.py             Emil's EMG position controllers
   DynamixelHardwareInterface.py  Emil's Dynamixel interface
 protocols/                   Cue protocols for recordings with labels (greb_1-3.csv)
-measurements/                Recordings and calibrations used by the commands in kommandoer.txt
+measurements/                The recordings (kept in git: they are the training data)
 tests/                       pytest suite
 ```
 
