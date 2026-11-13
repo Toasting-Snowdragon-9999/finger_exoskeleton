@@ -7,6 +7,7 @@ import numpy as np
 import settings
 from source.recording import RecordedSource, Recording, SessionWriter, new_session_folder
 from source.signal_processing import EMGBlock
+from tests.fakes import TWO_SENSORS
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -22,7 +23,7 @@ def test_session_folder_name(tmp_path: Path) -> None:
 def test_write_and_read_back(tmp_path: Path) -> None:
     """What SessionWriter writes, Recording reads back: channels, rate and samples."""
     samples = np.arange(20.0).reshape(2, 10) / 100
-    writer = SessionWriter(tmp_path, settings.CHANNELS, 2000.0, "trigno", {}, label="x")
+    writer = SessionWriter(tmp_path, TWO_SENSORS, 2000.0, "trigno", {}, label="x")
     writer.write(EMGBlock(samples[:, :4], 0, 0.0))
     writer.write(EMGBlock(samples[:, 4:], 4, 0.0))
     writer.finish([(0.0, "hello")], None)

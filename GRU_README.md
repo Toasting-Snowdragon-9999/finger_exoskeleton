@@ -66,6 +66,8 @@ Intentionen trænes mod et facit, der **ikke** kommer fra EMG'en selv: en cue-pr
 
 **Tremor-sandsynlighed** (0 … 1): over `GRU_TREMOR_ON` (0,6) tæller som tremor, under `GRU_TREMOR_OFF` (0,4) er tremoren væk. Holdetiderne er de samme som for DSP'en.
 
+**Lige nu bruges GRU'en kun til greb** (`GRU_USE_TREMOR = False` i `settings.py`). Tremor-delen er kun trænet på syntetisk tremor, og på de rigtige optagelser fra 13. november gav den falske tremor-alarmer. Derfor bestemmer DSP'en stadig tremor. Tremor-sandsynligheden vises i vinduet, men styrer ikke noget. Sæt `GRU_USE_TREMOR = True`, når modellen er trænet og testet på rigtig tremor.
+
 ## 1 eller 2 EMG-sensorer
 
 Modellen bygges til de sensorer, der står i `GRU_CHANNEL_ROLES` i `settings.py`:
@@ -154,7 +156,7 @@ Der er tre protokoller, `protocols/greb_1.csv`, `greb_2.csv` og `greb_3.csv`, p�
 - De første 10 sekunder er kalibreringen (hvil, derefter normalt greb). De har intet facit.
 - Skift mellem de tre protokoller. Hvis alle optagelser følger samme tidsplan, kan netværket lære tidsplanen i stedet for EMG'en.
 - Brug det samme objekt hver gang. Sæt gerne sensorerne på igen mellem optagelserne.
-- De første 0,5 s efter hvert skift regnes som ukendt, fordi en person skal bruge lidt tid på at reagere.
+- De første 1,5 s efter hvert skift regnes som ukendt (`GRU_LABEL_MARGIN_S`), fordi en person skal bruge tid på at reagere. På optagelserne fra 13. november begyndte grebet i gennemsnit 0,9 s (0,5–1,7 s) efter cue'en, og slip 0,75 s efter. Teksten i `labels.csv` er præcis det, skærmen viste; reaktionstiden lægges først på, når optagelsen læses til træning. I `plot_recording.py` er den skraveret.
 - Aktiv åbning (−1) og halvt greb (0,5) er ikke med. Motoren kan kun lukke fingeren, og et "halvt" greb kan ikke udføres ens uden en kraftmåler. Lav jeres egne protokoller ved at kopiere en af filerne.
 
 **Tjek hver optagelse, lige efter den er lavet:**

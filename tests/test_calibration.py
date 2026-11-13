@@ -78,7 +78,8 @@ def test_save_and_load(tmp_path: Path) -> None:
 def test_the_committed_calibration_files_load() -> None:
     """The calibration files used by the bench commands in kommandoer.txt still fit."""
     for path in (ROOT / "calibration_replay.json", ROOT / "measurements" / "plac_calibration.json"):
-        loaded, message = load_calibration(path, NAMES)
+        names = json.loads(path.read_text())["channel_names"]  # one or two sensors
+        loaded, message = load_calibration(path, names)
         assert loaded is not None, message
 
 

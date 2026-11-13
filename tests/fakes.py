@@ -3,9 +3,12 @@
 import numpy as np
 
 import settings
+from settings import Channel
 from source.gru.config import GRUConfig
 
 RATE = 2000.0
+# Two sensors for the tests, whatever settings.CHANNELS is set to on the bench
+TWO_SENSORS = [Channel("FDS", "flexor", 15), Channel("EDC", "extensor", 14)]
 
 
 def make_emg(segments: list[tuple[float, float]], n_channels: int = 2, tremor_hz: float = 0.0,

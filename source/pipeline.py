@@ -12,9 +12,10 @@ The live pipeline: what happens to every block of EMG.
     5. update the stiffness controller
 
   With a GRU estimator (run_emg.py --method gru) step 3 also asks the GRU, and its
-  intention and tremor probability replace the grasp and the tremor decision
-  when they are valid. The signal processing (DSP) still runs: it calibrates, it
-  arms the controller, and it takes over at once when the GRU is not valid.
+  intention replaces the grasp when it is valid; its tremor probability replaces
+  the tremor decision only with GRU_USE_TREMOR (settings.py). The signal processing
+  (DSP) still runs: it calibrates, it arms the controller, and it takes over at once
+  when the GRU is not valid.
 
   Acquisition: a thread that reads blocks from a source, records them (with
   --out) and gives them to Pipeline.step until it is stopped.
@@ -214,9 +215,11 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
             return dsp
         # The position controller closes the finger in proportion to the grasp (0-1), so
         # only the closing part of the intention is used; opening is "no grasp".
+        # Without GRU_USE_TREMOR the tremor stays the DSP's (tremor_probability None).
+        probability = estimate.tremor_probability if settings.GRU_USE_TREMOR else None
         return Activation(grasp=max(estimate.intention, 0.0), tremor_depth=dsp.tremor_depth,
                           tremor_ratio=dsp.tremor_ratio, receive_time=dsp.receive_time,
-                          tremor_probability=estimate.tremor_probability)
+                          tremor_probability=probability)
 
     def check_calibration(self) -> None:
         """Start using a finished calibration, or report why it failed."""

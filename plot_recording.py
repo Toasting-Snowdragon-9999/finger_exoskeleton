@@ -13,6 +13,8 @@ background is coloured by what the person was asked to do (from labels.csv):
   grey    KALIBRERING / VENT, or a part without a label
 
 A purple bar along the top marks tremor (label 1), e.g. synthetic tremor.
+The hatched start of every coloured part is the reaction time (GRU_LABEL_MARGIN_S):
+the label is unknown there and not used for training.
 
 What to look for: the envelope is flat in the blue parts, rises shortly after
 every green or red part begins, and falls again when it ends. A grip that
@@ -30,6 +32,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
+import settings
 from source.cues import LABELS_FILE
 from source.recording import Recording
 from source.signal_processing import EMGBlock, SignalProcessor
@@ -82,7 +85,11 @@ def plot_recording(folder: Path) -> Figure:
         row_number = recording.channels.index(channel)
         for row in rows:
             start, end = float(row["start_s"]), float(row["end_s"])
-            ax.axvspan(start, end, color=COLORS[kind_of(row)], alpha=0.3, linewidth=0)
+            kind = kind_of(row)
+            ax.axvspan(start, end, color=COLORS[kind], alpha=0.3, linewidth=0)
+            if kind != "other":  # the reaction time: not used for training
+                ax.axvspan(start, min(start + settings.GRU_LABEL_MARGIN_S, end), facecolor="none",
+                           edgecolor="white", hatch="//", linewidth=0)
             if row["tremor"].strip() == "1":  # a bar along the top of the plot
                 ax.axvspan(start, end, ymin=0.95, ymax=1.0, color=TREMOR_COLOR, linewidth=0)
         # The raw activity, faint, so the colours behind it stay visible
@@ -96,6 +103,8 @@ def plot_recording(folder: Path) -> Figure:
 
     handles: list[Artist] = [Patch(color=color, alpha=0.3, label=NAMES[kind])
                              for kind, color in COLORS.items()]
+    handles.append(Patch(facecolor="lightgrey", edgecolor="white", hatch="//",
+                         label="reaction time (not used)"))
     handles.append(Patch(color=TREMOR_COLOR, label="tremor (bar at the top)"))
     handles.append(Line2D([], [], color="black", label="slow envelope"))
     handles.append(Line2D([], [], color="grey", alpha=0.4, label="|filtered EMG|"))

@@ -42,7 +42,7 @@ def method_text(pipeline: Pipeline) -> str:
     if pipeline.estimator is None:
         return "DSP"
     if pipeline.using_gru:
-        return "GRU"
+        return "GRU (grasp and tremor)" if settings.GRU_USE_TREMOR else "GRU grasp + DSP tremor"
     return f"DSP (GRU not used: {pipeline.gru_note or 'waiting for an open finger'})"
 
 

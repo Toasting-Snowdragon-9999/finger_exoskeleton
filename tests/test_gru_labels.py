@@ -5,12 +5,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import settings
 from source.gru.labels import load_npz, load_session, read_labels
 from source.gru.synthetic import add_tremor, synthetic_recording
 from source.recording import SessionWriter
 from source.signal_processing import EMGBlock
-from tests.fakes import make_emg
+from tests.fakes import TWO_SENSORS, make_emg
 
 ROOT = Path(__file__).resolve().parent.parent
 MEASUREMENTS = ROOT / "measurements"
@@ -49,7 +48,7 @@ def test_rest_level_comes_from_the_calibration_that_was_used(tmp_path: Path) -> 
     from_file = load_session(MEASUREMENTS / BENCH, ROOT / "calibration_replay.json").rest_level
     assert np.allclose(from_file, [0.0036, 0.0056], atol=0.0001)
 
-    writer = SessionWriter(tmp_path, settings.CHANNELS, 2000.0, "trigno", {})
+    writer = SessionWriter(tmp_path, TWO_SENSORS, 2000.0, "trigno", {})
     writer.write(EMGBlock(make_emg([(4.0, 0.01)]), 0, 0.0))
     writer.finish([], None, calibration={"channel_names": ["FDS", "EDC"],
                                          "rest_slow": [0.5, 0.25], "reference_slow": [5, 4]})

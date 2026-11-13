@@ -54,7 +54,7 @@ def test_run_emg_uses_the_gru_on_a_replay(smoke_model: Path,
     assert run_emg.main(REPLAY + ["--model", str(smoke_model), "--duration", "4"]) == 0
     output = capsys.readouterr().out
     assert "SYNTHETIC data: software test only" in output
-    assert "GRU estimates in use" in output and "GRU: intention" in output
+    assert "GRU estimates in use" in output and "GRU grasp + DSP tremor: intention" in output
 
 
 def test_a_synthetic_model_is_not_used_with_the_motor(

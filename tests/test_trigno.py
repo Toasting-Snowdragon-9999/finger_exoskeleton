@@ -20,7 +20,8 @@ def started(slots: list[int], signal: np.ndarray) -> tuple[MockTCU, TrignoSource
 def test_reads_the_configured_slots_in_mv() -> None:
     """2000 Hz, column = STARTINDEX - 1, volts become mV."""
     slots = [channel.slot for channel in settings.CHANNELS]
-    signal = np.vstack([np.linspace(0, 0.001 * (i + 1) * (-1) ** i, 1000) for i in range(len(slots))])
+    signal = np.vstack([np.linspace(0, 0.001 * (i + 1) * (-1) ** i, 1000)
+                        for i in range(len(slots))])
     mock, source = started(slots, signal)
     try:
         source.start()

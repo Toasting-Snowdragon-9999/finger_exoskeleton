@@ -43,7 +43,9 @@ def test_a_recorded_session_is_drawn_with_one_plot_per_channel(tmp_path: Path) -
     figure = plot_recording.plot_recording(folder)
     assert len(figure.axes) == 2
     assert figure.axes[0].get_ylabel().startswith("FDS (flexor)")
-    assert len(figure.axes[0].patches) == 15  # one coloured span per row of the protocol
+    # one coloured span per row of the protocol, plus a hatched reaction time for each of
+    # the 13 rest and grip rows
+    assert len(figure.axes[0].patches) == 15 + 13
 
     assert plot_recording.main([str(folder), "--save"]) == 0
     assert (folder / "labels.png").stat().st_size > 10000
@@ -52,4 +54,4 @@ def test_a_recorded_session_is_drawn_with_one_plot_per_channel(tmp_path: Path) -
 def test_tremor_labels_get_a_bar() -> None:
     """The committed tremor recording: 7 label rows plus a bar for each of its 3 tremor spans."""
     figure = plot_recording.plot_recording(Path(str(BENCH) + "_tremor"))
-    assert len(figure.axes[0].patches) == 7 + 3
+    assert len(figure.axes[0].patches) == 7 + 3  # no cue texts and no intention: no hatching

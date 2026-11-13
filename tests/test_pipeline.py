@@ -4,17 +4,19 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import settings
+
 from source.calibration import Calibration
 from source.gru.inference import GRUEstimator
 from source.pipeline import Pipeline
 from source.recording import RecordedSource
 from source.signal_processing import EMGBlock
 from source.stiffness_controller import State
-from tests.fakes import RATE, FakeModel, make_emg
+from tests.fakes import RATE, TWO_SENSORS, FakeModel, make_emg
 
-CHANNELS = settings.CHANNELS
+CHANNELS = TWO_SENSORS
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -115,8 +117,9 @@ def gru_pipeline(model: FakeModel) -> Pipeline:
     return Pipeline(CHANNELS, RATE, estimator=GRUEstimator(model, CHANNELS, RATE))
 
 
-def test_gru_drives_the_controller_when_valid() -> None:
+def test_gru_drives_the_controller_when_valid(monkeypatch: pytest.MonkeyPatch) -> None:
     """A GRU that says "closing, tremor" brings the controller to STIFFENED without EMG tremor."""
+    monkeypatch.setattr(settings, "GRU_USE_TREMOR", True)
     pipeline = gru_pipeline(FakeModel(intention=0.8, probability=0.9))
     feed(pipeline, make_emg(REST_THEN_GRIP + [(1.0, 0.01)]))
     assert pipeline.using_gru and pipeline.state == State.STIFFENED
@@ -125,6 +128,17 @@ def test_gru_drives_the_controller_when_valid() -> None:
     assert pipeline.dsp_activation is not None and pipeline.dsp_activation.grasp < 0.1
     recent = pipeline.recent()
     assert recent["gru_intention"][-1] == 0.8 and recent["gru_probability"][-1] == 0.9
+
+
+def test_without_gru_tremor_the_dsp_decides_tremor() -> None:
+    """With GRU_USE_TREMOR off (the default) the GRU gives the grasp but not the tremor."""
+    assert not settings.GRU_USE_TREMOR
+    pipeline = gru_pipeline(FakeModel(intention=0.8, probability=0.9))
+    feed(pipeline, make_emg(REST_THEN_GRIP + [(1.0, 0.01)]))
+    assert pipeline.using_gru and pipeline.state == State.GRASP_ARMED  # no tremor in the EMG
+    assert pipeline.activation is not None and pipeline.activation.grasp == 0.8
+    assert pipeline.activation.tremor_probability is None
+    assert pipeline.recent()["gru_probability"][-1] == 0.9  # still shown in the viewer
 
 
 def test_arming_follows_the_signal_processing_not_the_gru() -> None:

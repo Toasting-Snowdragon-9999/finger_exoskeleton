@@ -105,8 +105,15 @@ GRU_BURN_IN_SECONDS = 0.5  # start of every training example that is not scored
 GRU_LEARNING_RATE = 0.001
 GRU_EPOCHS = 30
 GRU_BATCH_SIZE = 32
-GRU_LABEL_MARGIN_S = 0.5  # after every cue change the label is unknown (reaction time)
+# After every cue change the label is unknown for this long: the person needs time to react.
+# Measured on the cue recordings of 2026-11-13: the grip starts 0.9 s (0.5-1.7 s) and the
+# release 0.75 s (0.6-1.0 s) after the cue changes. 1.5 s covers nearly all of them.
+GRU_LABEL_MARGIN_S = 1.5
 GRU_WARMUP_S = 1.0  # after a reset the estimates are not valid for this long
+# Use the GRU's tremor output for the controller? False: the GRU gives the grasp and the
+# signal processing (DSP) still decides tremor. The tremor output has only been trained on
+# synthetic tremor and gave false alarms on real EMG (2026-11-13), so it is off for now.
+GRU_USE_TREMOR = False
 GRU_TREMOR_ON = 0.6  # tremor probability that counts as tremor...
 GRU_TREMOR_OFF = 0.4  # ...and below which the tremor has stopped
 GRU_MODEL_FILE = "models/gru.pt"

@@ -146,6 +146,7 @@ def evaluate(model: Any, recordings: list[LabelledRecording]) -> dict:
     result = {
         "recordings": [recording.name for recording in recordings],
         "synthetic_data": any(recording.synthetic for recording in recordings),
+        "all_synthetic": all(recording.synthetic for recording in recordings),
         "gru": {"intention": intention_metrics(data["intention"], data["intention_label"]),
                 "grasp": intention_metrics(data["gru_grasp"], grasp_label),
                 "tremor": tremor_metrics(data["gru_tremor"] > 0, data["tremor_label"], rate)},
@@ -159,8 +160,11 @@ def evaluate(model: Any, recordings: list[LabelledRecording]) -> dict:
 def format_results(result: dict) -> str:
     """The metrics as a small text table."""
     lines = []
-    if result["synthetic_data"]:
+    if result["all_synthetic"]:
         lines.append("SYNTHETIC DATA: a software test. This says nothing about real tremor.")
+    elif result["synthetic_data"]:
+        lines.append("Some recordings have SYNTHETIC tremor: the tremor numbers are a software "
+                     "test. Intention and grasp come from the real recordings.")
     for title, method, key in (("GRU intention (-1..+1)", "gru", "intention"),
                                ("GRU grasp (0..1)", "gru", "grasp"),
                                ("DSP grasp (0..1)", "dsp", "grasp"),
