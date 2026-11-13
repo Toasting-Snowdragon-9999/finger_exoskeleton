@@ -10,6 +10,9 @@ The stiffness controller: decides when the finger should be stiff because of tre
                --tremor depth < TREMOR_OFF or ratio < RATIO_OFF
                  for TREMOR_OFF_TIME_S-->                                         GRASP_ARMED
 
+With the GRU method (run_emg.py --method gru) the tremor conditions are instead: tremor
+probability >= GRU_TREMOR_ON, and < GRU_TREMOR_OFF; the hold times are the same.
+
 In STIFFENED the stiffness grows with the tremor depth. It rises at most
 ENGAGE_RATE_PER_S and falls at most RELEASE_RATE_PER_S. The stiffness is only
 shown in the viewer; the motor uses the state (see source/motor.py).
@@ -108,10 +111,14 @@ class StiffnessController:
             grasp, tremor, ratio = 0.0, 0.0, 0.0
         grasp_on = self.grasp_on.update(grasp >= settings.GRASP_ON, now)
         grasp_off = self.grasp_off.update(grasp < settings.GRASP_OFF, now)
-        tremor_on = self.tremor_on.update(
-            tremor >= settings.TREMOR_ON and ratio >= settings.RATIO_ON, now)
-        tremor_off = self.tremor_off.update(
-            tremor < settings.TREMOR_OFF or ratio < settings.RATIO_OFF, now)
+        if activation.tremor_probability is None:  # signal processing (DSP)
+            tremor_now = tremor >= settings.TREMOR_ON and ratio >= settings.RATIO_ON
+            tremor_gone = tremor < settings.TREMOR_OFF or ratio < settings.RATIO_OFF
+        else:  # the GRU's tremor probability
+            tremor_now = activation.tremor_probability >= settings.GRU_TREMOR_ON
+            tremor_gone = activation.tremor_probability < settings.GRU_TREMOR_OFF
+        tremor_on = self.tremor_on.update(tremor_now, now)
+        tremor_off = self.tremor_off.update(tremor_gone, now)
 
         if self.state == State.IDLE and grasp_on:
             self.go_to(State.GRASP_ARMED, f"grasp activation {grasp:.2f}")

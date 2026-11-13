@@ -3,6 +3,7 @@
 import numpy as np
 
 import settings
+from source.gru.config import GRUConfig
 
 RATE = 2000.0
 
@@ -72,3 +73,22 @@ class FakeMotors:
     def close(self) -> None:
         """Close the port."""
         self.closed = True
+
+
+class FakeModel:
+    """A GRU model stand-in without PyTorch: always answers the same two numbers."""
+
+    def __init__(self, roles: list[str] | None = None, intention: float = 0.5,
+                 probability: float = 0.1) -> None:
+        self.config = GRUConfig(channel_roles=roles or ["flexor"])
+        self.intention = intention
+        self.probability = probability
+        self.frames_seen = 0
+        self.hidden_seen: list = []  # the hidden state passed in at every call
+
+    def step(self, frames: np.ndarray, hidden: object) -> tuple[np.ndarray, np.ndarray, object]:
+        """Like IntentionTremorGRU.step: per-frame outputs and the new hidden state."""
+        self.hidden_seen.append(hidden)
+        self.frames_seen += len(frames)
+        return (np.full(len(frames), self.intention), np.full(len(frames), self.probability),
+                self.frames_seen)

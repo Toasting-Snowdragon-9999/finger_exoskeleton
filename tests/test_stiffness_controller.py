@@ -92,3 +92,20 @@ def test_disarm_drops_the_stiffness_at_once() -> None:
     run(controller, TREMOR, now, 1.0)
     controller.disarm("test")
     assert controller.state == State.DISARMED and controller.stiffness == 0.0
+
+
+def test_gru_probability_replaces_depth_and_ratio() -> None:
+    """With a tremor probability the depth and ratio are ignored; the hold times stay."""
+    likely = Activation(grasp=0.5, tremor_depth=0.0, tremor_ratio=0.0, receive_time=0.0,
+                        tremor_probability=0.9)
+    unlikely = Activation(grasp=0.5, tremor_depth=0.9, tremor_ratio=1.0, receive_time=0.0,
+                          tremor_probability=0.1)
+    controller = armed_controller()
+    now = run(controller, unlikely, 0.0, 1.0)
+    assert controller.state == State.GRASP_ARMED  # high depth and ratio do not count
+    now = run(controller, likely, now, 0.2)
+    assert controller.state == State.GRASP_ARMED  # TREMOR_ON_TIME_S (0.3 s) not reached yet
+    now = run(controller, likely, now, 0.2)
+    assert controller.state == State.STIFFENED
+    run(controller, unlikely, now, 0.8)
+    assert controller.state == State.GRASP_ARMED

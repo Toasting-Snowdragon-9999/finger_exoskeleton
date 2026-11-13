@@ -181,6 +181,9 @@ class Activation:
     tremor_depth: float  # of the channel with the most tremor
     tremor_ratio: float  # of that same channel
     receive_time: float  # when the block arrived (time.monotonic())
+    # Only set by the GRU method (--method gru): the network's tremor probability, 0-1.
+    # None means the signal processing (DSP) decides tremor from depth and ratio.
+    tremor_probability: float | None = None
 
 
 def compute_activation(block: ProcessedBlock, calibration: Calibration,
