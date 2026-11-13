@@ -90,6 +90,24 @@ HOLD_WINDOW_S = 1.0  # while STIFFENED: hold the mean grasp of this long before
 DEADBAND = 0.1
 GAMMA = 1.0
 
+# --- GRU: the neural-network alternative to the signal processing (see GRU_README.md) ------
+# Used with run_emg.py --method gru. A trained model file stores the values it was trained
+# with; the values here are for training a NEW model with train_gru.py.
+GRU_CHANNEL_ROLES = ["flexor"]  # one sensor; or ["flexor", "extensor"] for two sensors
+GRU_FEATURE_RATE_HZ = 100.0  # the network gets new features every 10 ms
+GRU_FEATURE_WINDOW_S = 0.05  # each feature is computed over the last 50 ms
+GRU_HIDDEN_UNITS = 64  # size of the GRU's memory
+GRU_SEQUENCE_SECONDS = 4.0  # length of one training example
+GRU_BURN_IN_SECONDS = 0.5  # start of every training example that is not scored
+GRU_LEARNING_RATE = 0.001
+GRU_EPOCHS = 30
+GRU_BATCH_SIZE = 32
+GRU_LABEL_MARGIN_S = 0.5  # after every cue change the label is unknown (reaction time)
+GRU_WARMUP_S = 1.0  # after a reset the estimates are not valid for this long
+GRU_TREMOR_ON = 0.6  # tremor probability that counts as tremor...
+GRU_TREMOR_OFF = 0.4  # ...and below which the tremor has stopped
+GRU_MODEL_FILE = "models/gru.pt"
+
 
 def processing_settings() -> dict:
     """The signal processing settings, as stored in a calibration file."""

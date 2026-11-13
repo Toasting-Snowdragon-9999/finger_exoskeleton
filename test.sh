@@ -16,6 +16,8 @@ PY="$VENV/bin/python"
 echo "==> Installing dev dependencies"
 "$PY" -m pip install --quiet --upgrade pip
 "$PY" -m pip install --quiet -r requirements-dev.txt || exit 1
+# PyTorch is optional: without it the GRU model tests are skipped
+"$PY" -m pip install --quiet -r requirements-ml.txt || echo "==> PyTorch not installed: GRU model tests are skipped"
 
 status=0
 run() {

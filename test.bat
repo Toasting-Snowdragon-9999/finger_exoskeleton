@@ -16,6 +16,8 @@ set "PY=%VENV%\Scripts\python.exe"
 echo ==^> Installing dev dependencies
 "%PY%" -m pip install --quiet --upgrade pip
 "%PY%" -m pip install --quiet -r requirements-dev.txt || exit /b 1
+rem PyTorch is optional: without it the GRU model tests are skipped
+"%PY%" -m pip install --quiet -r requirements-ml.txt || echo ==^> PyTorch not installed: GRU model tests are skipped
 
 set STATUS=0
 

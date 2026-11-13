@@ -1,0 +1,3 @@
+# Only for the GRU method (training and --method gru). The DSP method runs without it.
+-r requirements.txt
+torch

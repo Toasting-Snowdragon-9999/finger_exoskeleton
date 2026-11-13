@@ -221,3 +221,6 @@ __marimo__/
 logs/
 measurements/
 calibration*.json
+
+# Trained GRU models (make them again with train_gru.py)
+models/

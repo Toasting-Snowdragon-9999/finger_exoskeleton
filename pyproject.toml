@@ -41,6 +41,8 @@ py-version = "3.12"
 ignore-paths = ["^\\.venv/.*$"]
 # Emil's motor code is used as it is
 ignore = ["controllers.py", "DynamixelHardwareInterface.py"]
+# PyTorch is optional (requirements-ml.txt): only the GRU method needs it
+ignored-modules = ["torch"]
 
 [tool.pylint.format]
 max-line-length = 100
