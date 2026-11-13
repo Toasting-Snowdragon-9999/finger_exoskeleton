@@ -1,0 +1,55 @@
+{
+  "status": "complete",
+  "label": "chris",
+  "emg_file": "emg.csv",
+  "emg_units": "mV",
+  "channels": [
+    {
+      "name": "FDS",
+      "role": "flexor",
+      "trigno_slot": 15
+    }
+  ],
+  "processing": {
+    "bandpass_low_hz": 20.0,
+    "bandpass_high_hz": 450.0,
+    "bandpass_order": 4,
+    "notch_enabled": true,
+    "notch_hz": 50.0,
+    "notch_quality": 30.0,
+    "slow_window_s": 0.2,
+    "fast_cutoff_hz": 10.0,
+    "tremor_band_hz": [
+      4.0,
+      6.0
+    ],
+    "tremor_window_s": 0.5,
+    "rhythm_band_hz": [
+      1.0,
+      9.0
+    ],
+    "depth_min_envelope_mv": 0.01
+  },
+  "start_time": "2026-11-13T13:39:50+01:00",
+  "source": "trigno",
+  "sample_rate_hz": 2000.0,
+  "source_info": {
+    "host": "127.0.0.1:50040/50043",
+    "server": "Delsys Trigno System Digital Protocol Version 3.6.0",
+    "sample rate": "2000 Hz",
+    "slots": "FDS=slot 15@14"
+  },
+  "start_delay_s": 20.0,
+  "method": "dsp",
+  "calibration": null,
+  "end_time": "2026-11-13T13:41:20+01:00",
+  "samples_per_channel": 173502,
+  "duration_s": 86.751,
+  "events": [
+    {
+      "time_s": 29.997,
+      "message": "Calibration failed: Channel FDS: reference 0.0090 mV is not at least 3x the rest level 0.0031 mV. Repeat the calibration with a clear reference contraction. Press 'c' to repeat it."
+    }
+  ],
+  "error": ""
+}

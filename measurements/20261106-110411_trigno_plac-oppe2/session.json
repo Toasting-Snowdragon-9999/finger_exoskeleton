@@ -1,0 +1,153 @@
+{
+  "status": "complete",
+  "label": "plac-oppe2",
+  "note": "",
+  "emg_file": "emg.csv",
+  "emg_units": "mV",
+  "channels": [
+    {
+      "name": "FDS",
+      "role": "flexor",
+      "trigno_slot": 15,
+      "recorded_column": 1
+    },
+    {
+      "name": "EDC",
+      "role": "extensor",
+      "trigno_slot": 14,
+      "recorded_column": 0
+    }
+  ],
+  "config": {
+    "channels": [
+      {
+        "name": "FDS",
+        "role": "flexor",
+        "trigno_slot": 15,
+        "recorded_column": 1
+      },
+      {
+        "name": "EDC",
+        "role": "extensor",
+        "trigno_slot": 14,
+        "recorded_column": 0
+      }
+    ],
+    "trigno": {
+      "host": "127.0.0.1",
+      "command_port": 50040,
+      "emg_port": 50043,
+      "channels_on_port": 16,
+      "connect_timeout_s": 3.0,
+      "command_timeout_s": 5.0,
+      "data_timeout_s": 0.5,
+      "start_index_base": 1,
+      "required_units": "V",
+      "expected_sample_rate_hz": 0.0
+    },
+    "recorded": {
+      "file": "10_raw.csv",
+      "sample_rate_hz": 2000.0,
+      "block_size": 27,
+      "loop": true,
+      "realtime": true
+    },
+    "synthetic": {
+      "sample_rate_hz": 2000.0,
+      "block_size": 27,
+      "seed": 1,
+      "realtime": true,
+      "rest_noise_mv": 0.005,
+      "max_contraction_mv": 0.4,
+      "tremor_frequency_hz": 5.0,
+      "powerline_mv": 0.002,
+      "powerline_hz": 50.0
+    },
+    "processing": {
+      "bandpass_low_hz": 20.0,
+      "bandpass_high_hz": 450.0,
+      "bandpass_order": 4,
+      "notch_enabled": true,
+      "notch_hz": 50.0,
+      "notch_quality": 30.0,
+      "slow_window_s": 0.2,
+      "fast_cutoff_hz": 10.0,
+      "tremor_band_hz": [
+        4.0,
+        6.0
+      ],
+      "tremor_window_s": 0.5,
+      "rhythm_band_hz": [
+        1.0,
+        9.0
+      ],
+      "depth_min_envelope_mv": 0.01,
+      "frequency_window_s": 2.0
+    },
+    "runtime": {
+      "monitor_seconds": 5.0,
+      "max_reconnect_attempts": 3,
+      "reconnect_delay_s": 1.0
+    },
+    "calibration": {
+      "baseline_window_s": [
+        0.5,
+        3.0
+      ],
+      "reference_window_s": [
+        3.5,
+        10.0
+      ],
+      "reference_percentile": 95.0,
+      "min_reference_ratio": 3.0
+    },
+    "controller": {
+      "grasp_on_threshold": 0.25,
+      "grasp_off_threshold": 0.15,
+      "grasp_on_time_s": 0.1,
+      "grasp_off_time_s": 0.3,
+      "tremor_measure": "depth",
+      "tremor_on_threshold": 0.15,
+      "tremor_off_threshold": 0.08,
+      "tremor_min_ratio": 0.8,
+      "tremor_off_ratio": 0.6,
+      "tremor_on_time_s": 0.3,
+      "tremor_off_time_s": 0.75,
+      "engage_stiffness": 0.3,
+      "stiffness_gain": 2.0,
+      "max_stiffness": 1.0,
+      "engage_rate_per_s": 20.0,
+      "release_rate_per_s": 1.5
+    }
+  },
+  "start_time": "2026-11-06T11:04:14+01:00",
+  "source": "trigno",
+  "sample_rate_hz": 2000.0,
+  "source_info": {
+    "source": "trigno",
+    "sample rate": "2000 Hz",
+    "host": "127.0.0.1:50040/50043",
+    "server": "Delsys Trigno System Digital Protocol Version 3.6.0",
+    "backwards compat.": "True",
+    "upsampling": "True",
+    "slots": "FDS=slot 15@14, EDC=slot 14@13",
+    "warnings": "Documented rate 2000.000 Hz differs from MAX SAMPLES EMG / FRAME INTERVAL = 1259.259 Hz; using the documented rate"
+  },
+  "end_time": "2026-11-06T11:04:43+01:00",
+  "samples_per_channel": 52839,
+  "duration_s": 26.4195,
+  "counters": {
+    "blocks": 1943
+  },
+  "events": [
+    {
+      "time_s": 0.0,
+      "message": "Source started: trigno at 2000 Hz"
+    },
+    {
+      "time_s": 10.0035,
+      "message": "Calibration failed: Channel FDS: reference 0.0322 mV is not at least 3x the rest level 0.0162 mV. Repeat the calibration with a clear reference contraction. Press 'c' to repeat it."
+    }
+  ],
+  "error": ""
+}
