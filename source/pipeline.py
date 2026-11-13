@@ -10,6 +10,11 @@ The live pipeline: what happens to every block of EMG.
        the end of the calibration does not count as a grasp
     5. update the stiffness controller
 
+  With a GRU estimator (run_emg.py --method gru) step 3 also asks the GRU, and its
+  intention and tremor probability replace the grasp and the tremor decision
+  when they are valid. The signal processing (DSP) still runs: it calibrates, it
+  arms the controller, and it takes over at once when the GRU is not valid.
+
   Acquisition: a thread that reads blocks from a source, records them (with
   --out) and gives them to Pipeline.step until it is stopped.
 
@@ -27,8 +32,9 @@ import settings
 from settings import Channel
 from source.calibration import Activation, Calibration, Calibrator, compute_activation
 from source.calibration import load_calibration
+from source.gru.inference import GRUEstimate, GRUEstimator
 from source.recording import RecordedSource, SessionWriter
-from source.signal_processing import EMGBlock, SignalProcessor
+from source.signal_processing import EMGBlock, ProcessedBlock, SignalProcessor
 from source.stiffness_controller import HoldTimer, State, StiffnessController
 from source.trigno import TrignoSource
 
@@ -37,7 +43,8 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
     """Filtering, calibration and control of one stream of EMG blocks."""
 
     def __init__(self, channels: list[Channel], sample_rate: float,
-                 calibration_file: Path | None = None, use_saved: bool = True) -> None:
+                 calibration_file: Path | None = None, use_saved: bool = True,
+                 estimator: GRUEstimator | None = None) -> None:
         self.channels = channels
         self.names = [channel.name for channel in channels]
         self.sample_rate = sample_rate
@@ -58,11 +65,18 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
         self.recalibrate_requested = False
         self.samples_received = 0
 
+        self.estimator = estimator  # the GRU method, or None for signal processing only
+        self.dsp_activation: Activation | None = None  # always from the signal processing
+        self.gru_estimate: GRUEstimate | None = None  # newest answer of the GRU
+        self.using_gru = False  # True while the GRU's numbers drive the controller
+        self.gru_note = ""  # the last reason the GRU was not used
+
         self.lock = threading.Lock()  # the viewer reads the history from another thread
         self.messages: list[tuple[float, str]] = []  # (seconds of EMG received, text)
         blocks = int(settings.MONITOR_SECONDS * sample_rate / settings.BLOCK_SIZE) * 2
         self.history: deque = deque(maxlen=blocks)  # recent ProcessedBlocks
-        self.control_history: deque = deque(maxlen=blocks)  # (time, grasp, depth, stiffness)
+        # (time, grasp, depth, stiffness, GRU intention, GRU tremor probability) per block
+        self.control_history: deque = deque(maxlen=blocks)
 
         if calibration_file is not None and use_saved:
             saved, note = load_calibration(calibration_file, self.names)
@@ -94,7 +108,7 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
         """Copies of the last MONITOR_SECONDS of signals, for the viewer."""
         with self.lock:
             blocks = list(self.history)
-            control = np.array(list(self.control_history)).reshape(-1, 4).T
+            control = np.array(list(self.control_history)).reshape(-1, 6).T
             messages = [text for _, text in self.messages[-8:]]
         n_keep = int(settings.MONITOR_SECONDS * self.sample_rate)
         n_channels = len(self.channels)
@@ -114,12 +128,18 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
             "time": times[-n_keep:], "filtered": join("filtered"), "slow": join("slow"),
             "fast": join("fast"), "depth": join("depth"), "ratio": join("ratio"),
             "control_time": control[0], "grasp": control[1], "control_depth": control[2],
-            "stiffness": control[3], "messages": messages,
+            "stiffness": control[3], "gru_intention": control[4],
+            "gru_probability": control[5], "messages": messages,
         }
 
     def recalibrate(self) -> None:
         """Start a new calibration from the next block (called from the viewer)."""
         self.recalibrate_requested = True
+
+    def signal_interrupted(self) -> None:
+        """The EMG stopped for a while: the GRU's memory no longer fits, so empty it."""
+        if self.estimator is not None:
+            self.estimator.reset()
 
     # --- the work for every block -------------------------------------------------------------
 
@@ -142,15 +162,46 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
 
         now = (block.first_index + n) / self.sample_rate
         if self.calibration is not None:
-            self.activation = compute_activation(processed, self.calibration, self.flexors)
-            if self.waiting_to_arm:
-                self.arm_when_relaxed(self.activation, now)
+            dsp = compute_activation(processed, self.calibration, self.flexors)
+            self.dsp_activation = dsp
+            if self.waiting_to_arm:  # arming always follows the signal processing
+                self.arm_when_relaxed(dsp, now)
+            self.activation = self.choose_activation(dsp, processed)
         self.controller.update(self.activation, now)
 
         grasp = self.activation.grasp if self.activation is not None else 0.0
         depth = self.activation.tremor_depth if self.activation is not None else 0.0
+        estimate = self.gru_estimate
+        intention = estimate.intention if estimate is not None and estimate.valid else np.nan
+        probability = estimate.tremor_probability \
+            if estimate is not None and estimate.valid else np.nan
         with self.lock:
-            self.control_history.append((now, grasp, depth, self.controller.stiffness))
+            self.control_history.append(
+                (now, grasp, depth, self.controller.stiffness, intention, probability))
+
+    def choose_activation(self, dsp: Activation, processed: ProcessedBlock) -> Activation:
+        """The activation the controller gets: from the GRU when it is valid, else the DSP's."""
+        if self.estimator is None or self.calibration is None:
+            return dsp
+        estimate = self.estimator.update(processed, self.calibration.rest_slow)
+        self.gru_estimate = estimate
+        if not estimate.valid:
+            if estimate.reason != self.gru_note:
+                self.gru_note = estimate.reason
+                self.message(f"GRU not used ({estimate.reason}); using the signal processing")
+            self.using_gru = False  # back to the signal processing at once
+        elif not self.using_gru and self.state in (State.DISARMED, State.IDLE):
+            # Only switch to the GRU while the finger is open, so the motor target cannot jump
+            self.using_gru = True
+            self.gru_note = ""
+            self.message("GRU estimates in use")
+        if not self.using_gru:
+            return dsp
+        # The position controller closes the finger in proportion to the grasp (0-1), so
+        # only the closing part of the intention is used; opening is "no grasp".
+        return Activation(grasp=max(estimate.intention, 0.0), tremor_depth=dsp.tremor_depth,
+                          tremor_ratio=dsp.tremor_ratio, receive_time=dsp.receive_time,
+                          tremor_probability=estimate.tremor_probability)
 
     def check_calibration(self) -> None:
         """Start using a finished calibration, or report why it failed."""
@@ -189,6 +240,11 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
         self.waiting_to_arm = False
         self.loaded_calibration = False
         self.reported_error = None
+        self.dsp_activation = None
+        self.gru_estimate = None
+        self.using_gru = False
+        if self.estimator is not None:
+            self.estimator.reset(forget_broken=True)
         self.calibrator.restart()
         rest, grip = settings.REST_WINDOW_S, settings.GRIP_WINDOW_S
         self.message(f"Calibration restarted: rest {rest[0]:g}-{rest[1]:g} s, "
@@ -231,6 +287,7 @@ class Acquisition:
                     block = self.source.read_block()
                 except TimeoutError:
                     self.pipeline.message("No EMG data from the source; still waiting")
+                    self.pipeline.signal_interrupted()
                     continue
                 if block is None:
                     self.pipeline.message("Source finished (end of recording)")

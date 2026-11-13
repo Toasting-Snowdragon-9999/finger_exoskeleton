@@ -8,16 +8,23 @@ Examples (see kommandoer.txt for the bench commands):
   python run_emg.py --source trigno --motor --motor-port COM5     the grasp moves the motor
   python run_emg.py --source trigno --mock-tcu                    a fake TCU, no hardware
   python run_emg.py --source recorded --file measurements/<session folder>   replay
+  python run_emg.py --source trigno --method gru --model models/gru.pt   the GRU instead of DSP
   add --headless --duration 60 for status lines instead of a window
+
+--method dsp (the default) uses the signal processing; --method gru asks a trained
+GRU model (see GRU_README.md) and falls back to the signal processing when the
+model is missing or its estimates are not valid.
 """
 
 import argparse
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 import settings
+from source.gru.inference import GRUEstimator, load_model
 from source.mock_tcu import MockTCU
 from source.motor import GraspSignal, MotorThread, connect_motor
 from source.pipeline import Acquisition, Pipeline
@@ -51,6 +58,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              f"(default for live Trigno: {settings.CALIBRATION_FILE})")
     parser.add_argument("--calibrate", action="store_true",
                         help="calibrate now even if a saved calibration exists")
+    parser.add_argument("--method", choices=["dsp", "gru"], default="dsp",
+                        help="dsp: signal processing (default); gru: a trained GRU model")
+    parser.add_argument("--model", type=Path, default=Path(settings.GRU_MODEL_FILE),
+                        help=f"with --method gru: the model (default {settings.GRU_MODEL_FILE})")
     return parser.parse_args(argv)
 
 
@@ -64,6 +75,22 @@ def start_mock_tcu() -> MockTCU:
     return mock
 
 
+def load_gru_model(args: argparse.Namespace) -> Any:
+    """The GRU model for --method gru, or None: then the signal processing is used."""
+    if args.method != "gru":
+        return None
+    model, note = load_model(args.model)
+    if model is None:
+        print(f"GRU not available: {note}. Using the signal processing (DSP).")
+    elif args.motor and model.config.data_kind == "synthetic":
+        print("This GRU model was trained on synthetic data (a software test), so it is not "
+              "used with --motor. Using the signal processing (DSP).")
+        model = None
+    else:
+        print(note)
+    return model
+
+
 def calibration_file(args: argparse.Namespace) -> Path | None:
     """The calibration file to use: --calibration, else the default for live Trigno runs."""
     if args.calibration is not None:
@@ -71,6 +98,26 @@ def calibration_file(args: argparse.Namespace) -> Path | None:
     if args.source == "trigno" and not args.mock_tcu:
         return Path(settings.CALIBRATION_FILE)
     return None  # replays and the fake TCU calibrate every run
+
+
+def start_source(args: argparse.Namespace) -> tuple[RecordedSource | TrignoSource,
+                                                     MockTCU | None]:
+    """Start the EMG source (and the fake TCU with --mock-tcu)."""
+    mock = None
+    source: RecordedSource | TrignoSource
+    if args.source == "recorded":
+        source = RecordedSource(args.file, loop=not args.no_loop)
+        print(f"Replaying {args.file} at {source.sample_rate:g} Hz")
+    else:
+        host = args.host or settings.TRIGNO_HOST
+        ports = (settings.TRIGNO_COMMAND_PORT, settings.TRIGNO_EMG_PORT)
+        if args.mock_tcu:
+            mock = start_mock_tcu()
+            host, ports = "127.0.0.1", (mock.command_port, mock.emg_port)
+        source = TrignoSource(settings.CHANNELS, host, *ports)
+    source.start()
+    print(f"Streaming {source.name} EMG at {source.sample_rate:g} Hz")
+    return source, mock
 
 
 def show_until_done(args: argparse.Namespace, pipeline: Pipeline, acquisition: Acquisition) -> None:
@@ -89,24 +136,15 @@ def show_until_done(args: argparse.Namespace, pipeline: Pipeline, acquisition: A
 def main(argv: list[str] | None = None) -> int:
     """Run until the window is closed, --duration has passed or Ctrl+C; returns the exit code."""
     args = parse_args(argv)
+    model = load_gru_model(args)  # before the source starts: loading PyTorch takes a moment
 
-    mock = None
-    source: RecordedSource | TrignoSource
-    if args.source == "recorded":
-        source = RecordedSource(args.file, loop=not args.no_loop)
-        print(f"Replaying {args.file} at {source.sample_rate:g} Hz")
-    else:
-        host = args.host or settings.TRIGNO_HOST
-        ports = (settings.TRIGNO_COMMAND_PORT, settings.TRIGNO_EMG_PORT)
-        if args.mock_tcu:
-            mock = start_mock_tcu()
-            host, ports = "127.0.0.1", (mock.command_port, mock.emg_port)
-        source = TrignoSource(settings.CHANNELS, host, *ports)
-    source.start()
-    print(f"Streaming {source.name} EMG at {source.sample_rate:g} Hz")
+    source, mock = start_source(args)
 
+    estimator = None
+    if model is not None:
+        estimator = GRUEstimator(model, source.channels, source.sample_rate)
     pipeline = Pipeline(source.channels, source.sample_rate, calibration_file(args),
-                        use_saved=not args.calibrate)
+                        use_saved=not args.calibrate, estimator=estimator)
     if pipeline.loaded_calibration:
         print("Press 'c' in the window (or run with --calibrate) to calibrate again.")
     else:
@@ -142,7 +180,8 @@ def main(argv: list[str] | None = None) -> int:
         if mock is not None:
             mock.stop()
         if session is not None:
-            session.finish(pipeline.messages, acquisition.error)
+            calibration = pipeline.calibration.to_dict() if pipeline.calibration else None
+            session.finish(pipeline.messages, acquisition.error, calibration, args.method)
             print(f"Session saved to {session.folder}")
     return 1 if acquisition.error else 0
 

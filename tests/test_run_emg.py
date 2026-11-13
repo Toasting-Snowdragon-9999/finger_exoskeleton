@@ -23,6 +23,7 @@ def test_replay_with_recording(tmp_path: Path) -> None:
     (folder,) = tmp_path.iterdir()
     metadata = json.loads((folder / "session.json").read_text())
     assert metadata["status"] == "complete" and metadata["samples_per_channel"] > 2000
+    assert metadata["method"] == "dsp" and metadata["calibration"] is None  # too short to calibrate
     assert (folder / "emg.csv").read_text().startswith("time_s,FDS_mV,EDC_mV")
 
 
@@ -46,3 +47,13 @@ def test_fake_tcu() -> None:
     """--mock-tcu streams a recording through the real Trigno client."""
     code = run_emg.main(["--source", "trigno", "--mock-tcu", "--headless", "--duration", "1.5"])
     assert code == 0
+
+
+def test_gru_without_a_model_file_runs_on_the_signal_processing(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """--method gru with a missing model file says so and runs on the signal processing."""
+    code = run_emg.main(["--source", "recorded", "--file", str(RECORDING), "--headless",
+                         "--duration", "0.5", "--method", "gru",
+                         "--model", str(tmp_path / "none.pt")])
+    assert code == 0
+    assert "GRU not available" in capsys.readouterr().out

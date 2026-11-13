@@ -41,17 +41,21 @@ class Calibration:
                         f"calibration with a clear reference contraction.")
         return None
 
-    def save(self, path: Path) -> None:
-        """Write the calibration and the signal processing settings it was made with."""
-        data = {
+    def to_dict(self) -> dict:
+        """The levels as plain lists, for JSON."""
+        return {
             "channel_names": list(self.channel_names),
             "rest_slow": self.rest_slow.tolist(),
             "reference_slow": self.reference_slow.tolist(),
             "rest_fast": self.rest_fast.tolist(),
             "reference_fast": self.reference_fast.tolist(),
-            "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "processing": settings.processing_settings(),
         }
+
+    def save(self, path: Path) -> None:
+        """Write the calibration and the signal processing settings it was made with."""
+        data = self.to_dict()
+        data["saved_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        data["processing"] = settings.processing_settings()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 

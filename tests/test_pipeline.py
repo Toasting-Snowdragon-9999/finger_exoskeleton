@@ -7,11 +7,12 @@ import numpy as np
 
 import settings
 from source.calibration import Calibration
+from source.gru.inference import GRUEstimator
 from source.pipeline import Pipeline
 from source.recording import RecordedSource
 from source.signal_processing import EMGBlock
 from source.stiffness_controller import State
-from tests.fakes import RATE, make_emg
+from tests.fakes import RATE, FakeModel, make_emg
 
 CHANNELS = settings.CHANNELS
 ROOT = Path(__file__).resolve().parent.parent
@@ -76,3 +77,80 @@ def test_recalibrate_disarms_and_starts_over() -> None:
     feed(pipeline, make_emg([(0.1, 0.01)]), start_index=signal.shape[1])
     assert pipeline.state == State.DISARMED and pipeline.calibration is None
     assert pipeline.phase == "rest (baseline)"
+
+
+# --- with a GRU estimator (--method gru) -------------------------------------------------------
+
+REST_THEN_GRIP = [(3.5, 0.01), (6.5, 0.2), (2.0, 0.01)]  # calibrates and arms at about 10.4 s
+
+
+def gru_pipeline(model: FakeModel) -> Pipeline:
+    """A pipeline that asks a (fake) GRU model."""
+    return Pipeline(CHANNELS, RATE, estimator=GRUEstimator(model, CHANNELS, RATE))
+
+
+def test_gru_drives_the_controller_when_valid() -> None:
+    """A GRU that says "closing, tremor" brings the controller to STIFFENED without EMG tremor."""
+    pipeline = gru_pipeline(FakeModel(intention=0.8, probability=0.9))
+    feed(pipeline, make_emg(REST_THEN_GRIP + [(1.0, 0.01)]))
+    assert pipeline.using_gru and pipeline.state == State.STIFFENED
+    assert pipeline.activation is not None and pipeline.activation.grasp == 0.8
+    assert pipeline.activation.tremor_probability == 0.9
+    assert pipeline.dsp_activation is not None and pipeline.dsp_activation.grasp < 0.1
+    recent = pipeline.recent()
+    assert recent["gru_intention"][-1] == 0.8 and recent["gru_probability"][-1] == 0.9
+
+
+def test_arming_follows_the_signal_processing_not_the_gru() -> None:
+    """A GRU stuck at "no grasp" must not arm the controller while the grip is still held."""
+    pipeline = gru_pipeline(FakeModel(intention=0.0))
+    signal = make_emg(REST_THEN_GRIP)
+    feed(pipeline, signal[:, :round(10.2 * RATE)])
+    assert pipeline.calibration is not None and pipeline.state == State.DISARMED
+    feed(pipeline, signal[:, round(10.2 * RATE):], start_index=round(10.2 * RATE))
+    assert pipeline.state == State.IDLE
+
+
+def test_opening_intention_is_no_grasp_for_the_position_controller() -> None:
+    """A negative intention (open) gives grasp 0."""
+    pipeline = gru_pipeline(FakeModel(intention=-0.7))
+    feed(pipeline, make_emg(REST_THEN_GRIP + [(1.0, 0.01)]))
+    assert pipeline.using_gru and pipeline.activation is not None
+    assert pipeline.activation.grasp == 0.0 and pipeline.state == State.IDLE
+
+
+def test_an_invalid_gru_falls_back_at_once_and_says_so_once() -> None:
+    """A model for a missing sensor is never used; the reason is reported one time."""
+    model = FakeModel(["flexor", "other"])
+    pipeline = gru_pipeline(model)
+    feed(pipeline, make_emg(REST_THEN_GRIP))
+    assert not pipeline.using_gru and pipeline.activation is pipeline.dsp_activation
+    notes = [text for _, text in pipeline.messages if text.startswith("GRU not used")]
+    assert len(notes) == 1 and "needs a other sensor" in notes[0]
+
+
+def test_gru_takes_over_only_while_the_finger_is_open() -> None:
+    """After an interruption during a grasp the DSP keeps control until the grasp ends."""
+    pipeline = gru_pipeline(FakeModel(intention=0.8))
+    signal = make_emg(REST_THEN_GRIP + [(1.0, 0.01), (3.0, 0.2), (1.0, 0.01)])
+    grip_start = round(13.5 * RATE)
+    feed(pipeline, signal[:, :grip_start])
+    assert pipeline.using_gru and pipeline.state == State.GRASP_ARMED
+    pipeline.signal_interrupted()  # the EMG stalled: the GRU has to warm up again
+    feed(pipeline, signal[:, grip_start:grip_start + round(2.0 * RATE)], start_index=grip_start)
+    assert not pipeline.using_gru and pipeline.state == State.GRASP_ARMED  # DSP sees the grip
+    feed(pipeline, signal[:, grip_start + round(2.0 * RATE):],
+         start_index=grip_start + round(2.0 * RATE))
+    assert pipeline.using_gru  # back to the GRU once the DSP grasp ended (IDLE)
+
+
+def test_recalibration_resets_the_gru() -> None:
+    """Recalibrating clears the GRU's memory and stops using it until armed again."""
+    pipeline = gru_pipeline(FakeModel())
+    signal = make_emg(REST_THEN_GRIP)
+    feed(pipeline, signal)
+    assert pipeline.using_gru
+    pipeline.recalibrate()
+    feed(pipeline, make_emg([(0.1, 0.01)]), start_index=signal.shape[1])
+    assert not pipeline.using_gru and pipeline.gru_estimate is None
+    assert pipeline.estimator is not None and pipeline.estimator.hidden is None

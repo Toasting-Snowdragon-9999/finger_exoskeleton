@@ -5,7 +5,8 @@ Every run with `run_emg.py --out <folder>` gets its own sub-folder:
 
   <folder>/<YYYYMMDD-HHMMSS>_<source>[_<label>]/
       emg.csv        raw EMG: a header, then time_s and one column per channel in mV
-      session.json   start and end time, source, sample rate, channels, messages, error
+      session.json   start and end time, source, sample rate, channels, messages, error,
+                     the method (dsp or gru) and the calibration that was in use
 
 `run_emg.py --source recorded --file <session folder>` replays such a folder
 through the same pipeline as live EMG.
@@ -87,10 +88,17 @@ class SessionWriter:
             self.file.flush()
             self.last_flush = time.monotonic()
 
-    def finish(self, messages: list[tuple[float, str]], error: str | None) -> None:
-        """Close emg.csv and write the end of the run to session.json."""
+    def finish(self, messages: list[tuple[float, str]], error: str | None,
+               calibration: dict | None = None, method: str = "dsp") -> None:
+        """
+        Close emg.csv and write the end of the run to session.json. calibration:
+        the levels that were in use (Calibration.to_dict()), so the recording can
+        later be processed exactly as it was live. method: "dsp" or "gru".
+        """
         self.file.close()
         self.metadata.update(
+            method=method,
+            calibration=calibration,
             status="error" if error else "complete",
             end_time=now_text(),
             samples_per_channel=self.samples,

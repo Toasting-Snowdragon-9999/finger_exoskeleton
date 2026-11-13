@@ -34,14 +34,27 @@ def calibration_text(pipeline: Pipeline) -> str:
     return f"{pipeline.phase} ({pipeline.calibrator.seconds_left:.0f} s left)"
 
 
+def method_text(pipeline: Pipeline) -> str:
+    """Which method drives the controller now: the signal processing (DSP) or the GRU."""
+    if pipeline.estimator is None:
+        return "DSP"
+    if pipeline.using_gru:
+        return "GRU"
+    return f"DSP (GRU not used: {pipeline.gru_note or 'waiting for an open finger'})"
+
+
 def status_line(pipeline: Pipeline) -> str:
     """One line with the latest values, for --headless runs."""
     recent = pipeline.recent()
     channels = "  ".join(
         f"{name} {last(recent['slow'][i]) * 1000:6.1f} uV depth {last(recent['depth'][i]):4.2f} "
         f"ratio {last(recent['ratio'][i]):4.2f}" for i, name in enumerate(pipeline.names))
-    return (f"{channels} | {pipeline.state.value:11s} stiffness {last(recent['stiffness']):.2f} "
+    line = (f"{channels} | {pipeline.state.value:11s} stiffness {last(recent['stiffness']):.2f} "
             f"grasp {last(recent['grasp']):.2f} | cal {calibration_text(pipeline)}")
+    if pipeline.estimator is not None:
+        line += (f" | {method_text(pipeline)}: intention {last(recent['gru_intention']):+.2f} "
+                 f"tremor p {last(recent['gru_probability']):.2f}")
+    return line
 
 
 class LiveViewer:
@@ -72,10 +85,15 @@ class LiveViewer:
             self.control_ax.plot([], [], color="red", label="grasp activation")[0],
             self.control_ax.plot([], [], color="purple", label="tremor depth")[0],
             self.control_ax.plot([], [], color="black", linewidth=2, label="stiffness")[0])
+        self.gru_lines = None
+        if pipeline.estimator is not None:  # the GRU's two outputs, dashed
+            self.gru_lines = (
+                self.control_ax.plot([], [], "b--", label="GRU intention")[0],
+                self.control_ax.plot([], [], "m--", label="GRU tremor probability")[0])
         self.control_ax.axhline(settings.GRASP_ON, color="red", linestyle="--", linewidth=0.8)
         self.control_ax.axhline(settings.TREMOR_ON, color="purple", linestyle="--", linewidth=0.8)
         self.control_ax.set_xlim(-settings.MONITOR_SECONDS, 0)
-        self.control_ax.set_ylim(0, 1.05)
+        self.control_ax.set_ylim(-1.05 if pipeline.estimator is not None else 0, 1.05)
         self.control_ax.set_xlabel("Seconds before now")
         self.control_ax.legend(loc="upper left", fontsize=7, ncol=3)
         self.control_ax.grid(alpha=0.3)
@@ -109,6 +127,9 @@ class LiveViewer:
         for line, values in zip(self.control_lines,
                                 (recent["grasp"], recent["control_depth"], recent["stiffness"])):
             line.set_data(control_ago, values)
+        if self.gru_lines is not None:
+            self.gru_lines[0].set_data(control_ago, recent["gru_intention"])
+            self.gru_lines[1].set_data(control_ago, recent["gru_probability"])
         state = pipeline.state.value
         self.control_ax.set_title(f"Controller {state}  [{pipeline.controller.last_transition}]",
                                   fontsize=8, color=STATE_COLORS[state])
@@ -117,7 +138,8 @@ class LiveViewer:
         for i, name in enumerate(pipeline.names):
             lines.append(f"{name:8s} {last(recent['slow'][i]) * 1000:7.1f} "
                          f"{last(recent['depth'][i]):6.2f} {last(recent['ratio'][i]):6.2f}")
-        lines += ["", f"Controller:  {state}", f"Stiffness:   {last(recent['stiffness']):.2f}",
+        lines += ["", f"Method:      {method_text(pipeline)}",
+                  f"Controller:  {state}", f"Stiffness:   {last(recent['stiffness']):.2f}",
                   f"Grasp:       {last(recent['grasp']):.2f}",
                   f"Calibration: {calibration_text(pipeline)}", "",
                   "Keys: c calibrate again | q quit", ""] + recent["messages"]
