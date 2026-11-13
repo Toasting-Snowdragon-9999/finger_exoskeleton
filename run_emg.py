@@ -31,6 +31,8 @@ from source.pipeline import Acquisition, Pipeline
 from source.recording import Recording, RecordedSource, SessionWriter, new_session_folder
 from source.trigno import TrignoSource
 
+Source = RecordedSource | TrignoSource  # where the EMG comes from
+
 # What the fake TCU streams: a recording of two long grips
 MOCK_RECORDING = Path(__file__).parent / "measurements" / "20261105-144738_trigno_to-lange-greb"
 
@@ -100,11 +102,10 @@ def calibration_file(args: argparse.Namespace) -> Path | None:
     return None  # replays and the fake TCU calibrate every run
 
 
-def start_source(args: argparse.Namespace) -> tuple[RecordedSource | TrignoSource,
-                                                     MockTCU | None]:
+def start_source(args: argparse.Namespace) -> tuple[Source, MockTCU | None]:
     """Start the EMG source (and the fake TCU with --mock-tcu)."""
     mock = None
-    source: RecordedSource | TrignoSource
+    source: Source
     if args.source == "recorded":
         source = RecordedSource(args.file, loop=not args.no_loop)
         print(f"Replaying {args.file} at {source.sample_rate:g} Hz")
