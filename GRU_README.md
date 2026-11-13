@@ -57,10 +57,10 @@ Netværket har ca. 13.000 vægte, og ét skridt tager ca. 0,03 ms på en alminde
 
 | Værdi | Betydning |
 |---|---|
-| +1 | luk helt |
-| +0,5 | luk halvt |
-| 0 | hvil |
-| −1 | åbn aktivt (stræk fingrene) |
+| +1 | luk: grib om objektet (normalt greb eller hårdt klem) |
+| 0 | hvil (åben, afslappet hånd) |
+| mellem 0 og 1 | delvist lukket; kræver facit fra fx en kraftmåler |
+| −1 | åbn aktivt (stræk fingrene); kræver strækker-sensor og er ikke med i protokollerne |
 
 Intentionen trænes mod et facit, der **ikke** kommer fra EMG'en selv: en cue-protokol eller målt bevægelse. Positionscontrolleren bruger kun lukke-delen, `max(intention, 0)`.
 
@@ -139,10 +139,23 @@ Et tomt felt betyder "ved vi ikke". Det er helt i orden: de øjeblikke tæller b
 **1. Egne optagelser med cue-protokol (intention).** Skærmen fortæller forsøgspersonen, hvad der skal gøres, og protokollen gemmes som facit:
 
 ```bat
-.venv\Scripts\python.exe run_emg.py --source trigno --out measurements --label cue1 --cues protocols\greb_protokol.csv
+.venv\Scripts\python.exe run_emg.py --source trigno --out measurements --label cue1 --cues protocols\greb_1.csv
 ```
 
-`protocols/greb_protokol.csv` er et eksempel på 62 sekunder: kalibrering, luk helt, luk halvt, åbn og hvil. Lav jeres egne protokoller ved at kopiere filen. De første 0,5 s efter hvert skift regnes som ukendt, fordi en person skal bruge lidt tid på at reagere.
+Der er tre protokoller, `protocols/greb_1.csv`, `greb_2.csv` og `greb_3.csv`, på 64–66 sekunder hver. De indeholder de samme tre ting i forskellig rækkefølge og med forskellig varighed (3–6 s):
+
+| Cue | Hvad personen gør | Facit |
+|---|---|---|
+| HVIL | slipper objektet og slapper af (åben, afslappet hånd) | 0 |
+| GRIB | griber objektet med normalt greb, kun den nødvendige kraft | 1 |
+| KLEM HÅRDT | klemmer hårdt om det samme objekt | 1 |
+
+- Begge greb har facit 1, fordi exoskelettet styrer position: i begge tilfælde skal fingeren være lukket om objektet. Netværket lærer dermed, at et greb er et greb, uanset hvor hårdt der klemmes.
+- De første 10 sekunder er kalibreringen (hvil, derefter normalt greb). De har intet facit.
+- Skift mellem de tre protokoller. Hvis alle optagelser følger samme tidsplan, kan netværket lære tidsplanen i stedet for EMG'en.
+- Brug det samme objekt hver gang. Sæt gerne sensorerne på igen mellem optagelserne.
+- De første 0,5 s efter hvert skift regnes som ukendt, fordi en person skal bruge lidt tid på at reagere.
+- Aktiv åbning (−1) og halvt greb (0,5) er ikke med. Motoren kan kun lukke fingeren, og et "halvt" greb kan ikke udføres ens uden en kraftmåler. Lav jeres egne protokoller ved at kopiere en af filerne.
 
 **2. Syntetisk tremor (tremor).** `--add-synthetic-tremor` lægger kunstig 4–7 Hz-tremor oven på tremorfri optagelser, så facit er kendt præcist. Det er et hjælpemiddel til træning, ikke rigtig tremor.
 

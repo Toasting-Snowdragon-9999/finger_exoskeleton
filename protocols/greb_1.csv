@@ -1,0 +1,16 @@
+start_s,end_s,cue,intention,tremor
+0,3,KALIBRERING: hvil hånden,,
+3,10,KALIBRERING: grib objektet med normalt greb og hold,,
+10,14,HVIL: slip og slap af,0,0
+14,18,GRIB objektet med normalt greb og hold,1,0
+18,23,HVIL: slip og slap af,0,0
+23,27,KLEM HÅRDT om objektet og hold,1,0
+27,30,HVIL: slip og slap af,0,0
+30,35,GRIB objektet med normalt greb og hold,1,0
+35,39,HVIL: slip og slap af,0,0
+39,42,KLEM HÅRDT om objektet og hold,1,0
+42,47,HVIL: slip og slap af,0,0
+47,53,GRIB objektet med normalt greb og hold,1,0
+53,56,HVIL: slip og slap af,0,0
+56,60,KLEM HÅRDT om objektet og hold,1,0
+60,64,HVIL: slip og slap af,0,0

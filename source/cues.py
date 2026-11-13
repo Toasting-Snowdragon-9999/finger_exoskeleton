@@ -2,15 +2,15 @@
 A cue protocol: tells the person what to do and when, and turns that into labels.
 
 The GRU needs a reference for the movement intention that does not come from the
-EMG itself. A cue protocol gives one: the screen says "LUK HELT" from 14 to 18 s,
+EMG itself. A cue protocol gives one: the screen says "GRIB objektet" from 14 to 18 s,
 so the intention in that interval is known to be +1.
 
-The protocol is a CSV file (see protocols/greb_protokol.csv):
+The protocol is a CSV file (see protocols/greb_1.csv; no commas in the cue text):
 
   start_s,end_s,cue,intention,tremor
-  10,14,HVIL,0,0
-  14,18,LUK HELT og hold,1,0
-  30,34,AABN: straek fingrene og hold,-1,0
+  10,14,HVIL: slip og slap af,0,0
+  14,18,GRIB objektet med normalt greb og hold,1,0
+  23,27,KLEM HÅRDT om objektet og hold,1,0
 
   intention   -1 = open actively, 0 = rest, +1 = close fully (0.5 = half); empty = unknown
   tremor      1 = tremor, 0 = no tremor; empty = unknown
@@ -39,7 +39,7 @@ class CueProtocol:
             if float(row["start_s"]) <= time_s < float(row["end_s"]):
                 return row["cue"]
         if self.rows and time_s >= float(self.rows[-1]["end_s"]):
-            return "FAERDIG"
+            return "FÆRDIG"
         return ""
 
     def write_labels(self, folder: Path) -> None:

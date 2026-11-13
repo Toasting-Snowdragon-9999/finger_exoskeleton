@@ -9,7 +9,7 @@ Examples (see kommandoer.txt for the bench commands):
   python run_emg.py --source trigno --mock-tcu                    a fake TCU, no hardware
   python run_emg.py --source recorded --file measurements/<session folder>   replay
   python run_emg.py --source trigno --method gru --model models/gru.pt   the GRU instead of DSP
-  python run_emg.py --source trigno --out measurements --cues protocols/greb_protokol.csv
+  python run_emg.py --source trigno --out measurements --cues protocols/greb_1.csv
                                                     show cues and save them as labels.csv
   add --headless --duration 60 for status lines instead of a window
 

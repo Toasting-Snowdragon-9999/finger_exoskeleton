@@ -39,7 +39,7 @@ bench are in [kommandoer.txt](kommandoer.txt).
 | Drive the tendon motor | add `--motor` (optional `--motor-port COM5`) |
 | Use or write another calibration file | add `--calibration <file>` |
 | Calibrate again | add `--calibrate`, or press `c` in the window |
-| Show cues and save them as labels | add `--out measurements --cues protocols\greb_protokol.csv` |
+| Show cues and save them as labels | add `--out measurements --cues protocols\greb_1.csv` |
 | Use a trained GRU model instead of the signal processing | add `--method gru --model models\gru.pt` |
 
 The window shows the filtered EMG of every channel with its slow envelope (effort) and fast
@@ -185,7 +185,7 @@ source/
                              real-time interface (see GRU_README.md)
   controllers.py             Emil's EMG position controllers
   DynamixelHardwareInterface.py  Emil's Dynamixel interface
-protocols/                   Example cue protocol
+protocols/                   Cue protocols for recordings with labels (greb_1-3.csv)
 measurements/                Recordings and calibrations used by the commands in kommandoer.txt
 tests/                       pytest suite
 ```
