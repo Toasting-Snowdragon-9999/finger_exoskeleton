@@ -23,6 +23,24 @@ Optag en session (gemmes i measurements\, skift "navn"):
 Lav en ny kalibrering og gem den (hvile 0,5-3 s, så fast greb inden 10 s):
 .venv\Scripts\python.exe run_emg.py --source trigno --calibrate --calibration measurements\plac_calibration.json
 
+GRU (neuralt netværk i stedet for signalbehandling, se GRU_README.md). Kræver PyTorch:
+.venv\Scripts\python.exe -m pip install -r requirements-ml.txt
+
+Optag en session med cues (giver labels.csv til træning):
+.venv\Scripts\python.exe run_emg.py --source trigno --out measurements --label cue1 --cues protocols\greb_protokol.csv --calibration measurements\plac_calibration.json
+
+Træn en GRU-model på mindst 3 cue-optagelser:
+.venv\Scripts\python.exe train_gru.py --sessions measurements\<mappe1> measurements\<mappe2> measurements\<mappe3> --add-synthetic-tremor
+
+Test modellen og DSP'en på en optagelse, modellen ikke har set:
+.venv\Scripts\python.exe evaluate_gru.py --model models\gru.pt --sessions measurements\<ny mappe>
+
+Kør live med GRU i stedet for DSP (falder tilbage til DSP, hvis modellen ikke er gyldig):
+.venv\Scripts\python.exe run_emg.py --source trigno --calibration measurements\plac_calibration.json --method gru --model models\gru.pt
+
+Softwaretest af GRU-koden på opdigtede data (modellen kan IKKE bruges til noget):
+.venv\Scripts\python.exe train_gru.py --smoke-test --out models\smoke.pt
+
 Prøv programmet uden hardware (en falsk TCU afspiller en optagelse):
 .venv\Scripts\python.exe run_emg.py --source trigno --mock-tcu
 

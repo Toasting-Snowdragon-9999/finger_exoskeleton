@@ -39,11 +39,17 @@ bench are in [kommandoer.txt](kommandoer.txt).
 | Drive the tendon motor | add `--motor` (optional `--motor-port COM5`) |
 | Use or write another calibration file | add `--calibration <file>` |
 | Calibrate again | add `--calibrate`, or press `c` in the window |
+| Show cues and save them as labels | add `--out measurements --cues protocols\greb_protokol.csv` |
+| Use a trained GRU model instead of the signal processing | add `--method gru --model models\gru.pt` |
 
 The window shows the filtered EMG of every channel with its slow envelope (effort) and fast
 envelope (tremor bursts), a controller panel (grasp activation, tremor depth and stiffness,
 with the on-thresholds dashed) and a text panel with the latest values, the controller
 state, the calibration and messages. Keys: `c` calibrate again, `q` quit.
+
+The signal processing (DSP) is the default method. A small GRU neural network can be trained
+as an alternative and compared with it on the same controller: see
+[GRU_README.md](GRU_README.md) (in Danish).
 
 ### Calibration
 
@@ -160,6 +166,8 @@ virtualenv (default: `py -3` on Windows, `python3` on Linux).
 
 ```
 run_emg.py                   Command line: source, pipeline, window or status lines, motor
+train_gru.py                 Train a GRU model (needs PyTorch, requirements-ml.txt)
+evaluate_gru.py              Test a GRU model and the DSP on recordings with labels
 settings.py                  All settings as plain constants
 main.py, main_controller.py  Emil's motor tools (one command; bench test of the controllers)
 source/
@@ -172,8 +180,12 @@ source/
   pipeline.py                Pipeline (what happens to every block) and the Acquisition thread
   motor.py                   GraspSignal, MotorThread, connect_motor
   viewer.py                  The live window and the status line
+  cues.py                    Cue protocol: what to do when, saved as labels.csv
+  gru/                       The GRU method: features, model, training, evaluation,
+                             real-time interface (see GRU_README.md)
   controllers.py             Emil's EMG position controllers
   DynamixelHardwareInterface.py  Emil's Dynamixel interface
+protocols/                   Example cue protocol
 measurements/                Recordings and calibrations used by the commands in kommandoer.txt
 tests/                       pytest suite
 ```
