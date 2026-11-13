@@ -32,6 +32,8 @@ def calibration_text(pipeline: Pipeline) -> str:
         return f"FAILED: {pipeline.calibrator.error}"
     if pipeline.phase in ("done", "relax to arm"):
         return pipeline.phase
+    if pipeline.waiting_to_start:
+        return f"starts in {pipeline.start_delay_s - pipeline.stream_time:.0f} s"
     return f"{pipeline.phase} ({pipeline.calibrator.seconds_left:.0f} s left)"
 
 
@@ -119,7 +121,7 @@ class LiveViewer:
         """Copy the newest data into the plots."""
         pipeline = self.pipeline
         if self.protocol is not None:
-            cue = self.protocol.cue_at(pipeline.samples_received / pipeline.sample_rate)
+            cue = self.protocol.cue_at(pipeline.stream_time)
             self.figure.suptitle(cue, fontsize=28, color="darkblue")
         recent = pipeline.recent()
         newest = last(recent["time"])

@@ -142,7 +142,7 @@ Et tomt felt betyder "ved vi ikke". Det er helt i orden: de øjeblikke tæller b
 .venv\Scripts\python.exe run_emg.py --source trigno --out measurements --label cue1 --cues protocols\greb_1.csv
 ```
 
-Der er tre protokoller, `protocols/greb_1.csv`, `greb_2.csv` og `greb_3.csv`, på 64–66 sekunder hver. De indeholder de samme tre ting i forskellig rækkefølge og med forskellig varighed (3–6 s):
+Der er tre protokoller, `protocols/greb_1.csv`, `greb_2.csv` og `greb_3.csv`, på 64–66 sekunder hver. En live-optagelse venter først 20 sekunder (`START_DELAY_S` i `settings.py`), så vinduet når at åbne; imens viser skærmen en nedtælling ("VENT: starter om 12 s"). En optagelse varer derfor ca. 85 sekunder, og tiderne i `labels.csv` er forskudt tilsvarende. De indeholder de samme tre ting i forskellig rækkefølge og med forskellig varighed (3–6 s):
 
 | Cue | Hvad personen gør | Facit |
 |---|---|---|

@@ -80,3 +80,24 @@ def test_cues_need_a_recording() -> None:
     """--cues without --out is refused: the labels would have nowhere to go."""
     with pytest.raises(SystemExit):
         run_emg.main(["--source", "recorded", "--file", str(RECORDING), "--cues", "x.csv"])
+
+
+def test_start_delay_is_saved_and_used_again_for_a_replay(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """--start-delay shifts cues and labels, is stored in session.json and reused on replay."""
+    protocol = tmp_path / "protocol.csv"
+    protocol.write_text("start_s,end_s,cue,intention,tremor\n0,5,HVIL,0,0\n", encoding="utf-8")
+    code = run_emg.main(["--source", "recorded", "--file", str(RECORDING), "--headless",
+                         "--duration", "1.5", "--out", str(tmp_path / "out"),
+                         "--cues", str(protocol), "--start-delay", "0.7"])
+    assert code == 0
+    output = capsys.readouterr().out
+    assert output.index(">>> VENT: starter om 1 s") < output.index(">>> HVIL")
+    (folder,) = (tmp_path / "out").iterdir()
+    assert (folder / "labels.csv").read_text().splitlines()[1] == "0.7,5.7,0,0"
+    assert json.loads((folder / "session.json").read_text())["start_delay_s"] == 0.7
+
+    args = run_emg.parse_args(["--source", "recorded", "--file", str(folder)])
+    replay = run_emg.RecordedSource(folder)
+    assert run_emg.start_delay(args, replay) == 0.7
+    assert run_emg.start_delay(args, run_emg.RecordedSource(RECORDING)) == 0.0  # old recording

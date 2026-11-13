@@ -36,6 +36,32 @@ def test_a_grip_held_after_calibration_does_not_arm() -> None:
     assert any(text == "Hand relaxed; controller armed" for _, text in pipeline.messages)
 
 
+def test_start_delay_moves_the_calibration_routine() -> None:
+    """With a start delay the rest and grip windows begin that much later."""
+    pipeline = Pipeline(CHANNELS, RATE, start_delay_s=2.0)
+    signal = make_emg([(2.0 + 3.5, 0.01), (6.5, 0.2), (2.0, 0.01)])
+    feed(pipeline, signal[:, :round(1.5 * RATE)])
+    assert pipeline.phase == "waiting to start" and pipeline.calibrator.start_index is None
+    feed(pipeline, signal[:, round(1.5 * RATE):], start_index=round(1.5 * RATE))
+    assert pipeline.calibration is not None and pipeline.state == State.IDLE
+    assert np.all(pipeline.calibration.rest_slow < 0.02)  # the rest window saw rest only
+
+    without_delay = Pipeline(CHANNELS, RATE)  # the same signal: the grip comes 2 s "late"
+    feed(without_delay, signal)
+    assert without_delay.calibration is not None
+    assert pipeline.calibration.reference_slow[0] >= without_delay.calibration.reference_slow[0]
+
+
+def test_a_saved_calibration_does_not_wait_for_the_start_delay(tmp_path: Path) -> None:
+    """The delay is for the calibration routine; a loaded calibration is used at once."""
+    path = tmp_path / "calibration.json"
+    levels = np.array([0.01, 0.01]), np.array([0.2, 0.2])
+    Calibration(["FDS", "EDC"], levels[0], levels[1], levels[0], levels[1]).save(path)
+    pipeline = Pipeline(CHANNELS, RATE, calibration_file=path, start_delay_s=20.0)
+    feed(pipeline, make_emg([(0.5, 0.01)]))
+    assert pipeline.state == State.IDLE and not pipeline.waiting_to_start
+
+
 def test_a_saved_calibration_is_used_and_arms_after_relaxing(tmp_path: Path) -> None:
     """With a calibration file no routine runs; resting for 0.3 s arms the controller."""
     path = tmp_path / "calibration.json"

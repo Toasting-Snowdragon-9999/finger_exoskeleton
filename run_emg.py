@@ -63,6 +63,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              f"(default for live Trigno: {settings.CALIBRATION_FILE})")
     parser.add_argument("--calibrate", action="store_true",
                         help="calibrate now even if a saved calibration exists")
+    parser.add_argument("--start-delay", type=float,
+                        help="seconds to wait before the calibration routine and the cues begin "
+                             f"(default: {settings.START_DELAY_S:g} for live Trigno; for a replay "
+                             "what the recording was made with)")
     parser.add_argument("--cues", type=Path,
                         help="with --out: a cue protocol (CSV) to show; saved as labels.csv")
     parser.add_argument("--method", choices=["dsp", "gru"], default="dsp",
@@ -129,6 +133,15 @@ def start_source(args: argparse.Namespace) -> tuple[Source, MockTCU | None]:
     return source, mock
 
 
+def start_delay(args: argparse.Namespace, source: Source) -> float:
+    """Seconds of EMG before the calibration routine and the cues begin."""
+    if args.start_delay is not None:
+        return float(args.start_delay)
+    if isinstance(source, RecordedSource):  # replay exactly as it was recorded
+        return float(source.recording.metadata.get("start_delay_s", 0.0))
+    return settings.START_DELAY_S
+
+
 def show_until_done(args: argparse.Namespace, pipeline: Pipeline, acquisition: Acquisition,
                     protocol: CueProtocol | None) -> None:
     """The live window, or a status line every second with --headless. Shows the cues."""
@@ -143,7 +156,7 @@ def show_until_done(args: argparse.Namespace, pipeline: Pipeline, acquisition: A
     while acquisition.running and time.monotonic() < end:
         time.sleep(min(0.1, max(0.0, end - time.monotonic())))
         if protocol is not None:
-            cue = protocol.cue_at(pipeline.samples_received / pipeline.sample_rate)
+            cue = protocol.cue_at(pipeline.stream_time)
             if cue != shown_cue:
                 shown_cue = cue
                 print(f">>> {cue}", flush=True)
@@ -162,23 +175,26 @@ def main(argv: list[str] | None = None) -> int:
     estimator = None
     if model is not None:
         estimator = GRUEstimator(model, source.channels, source.sample_rate)
+    delay = start_delay(args, source)
     pipeline = Pipeline(source.channels, source.sample_rate, calibration_file(args),
-                        use_saved=not args.calibrate, estimator=estimator)
+                        use_saved=not args.calibrate, estimator=estimator, start_delay_s=delay)
     if pipeline.loaded_calibration:
         print("Press 'c' in the window (or run with --calibrate) to calibrate again.")
     else:
         rest, grip = settings.REST_WINDOW_S, settings.GRIP_WINDOW_S
-        print(f"Calibration: rest from {rest[0]:g} to {rest[1]:g} s, then hold a firm grip from "
-              f"{grip[0]:g} to {grip[1]:g} s. Then relax: the controller arms.")
+        print(f"Calibration starts after {delay:g} s: rest from {rest[0]:g} to {rest[1]:g} s, "
+              f"then hold a firm grip from {grip[0]:g} to {grip[1]:g} s. Then relax: the "
+              f"controller arms.")
 
     session = None
     if args.out is not None:
         folder = new_session_folder(args.out, source.name, args.label)
         session = SessionWriter(folder, source.channels, source.sample_rate, source.name,
                                 source.info(), args.label)
+        session.metadata["start_delay_s"] = delay  # so a replay waits just as long
         print(f"Recording to {folder}")
 
-    protocol = CueProtocol(args.cues) if args.cues is not None else None
+    protocol = CueProtocol(args.cues, start_s=delay) if args.cues is not None else None
     acquisition = Acquisition(source, pipeline, session)
     acquisition.start()
     motors = motor_thread = None

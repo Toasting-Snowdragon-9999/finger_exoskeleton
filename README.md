@@ -39,6 +39,7 @@ bench are in [kommandoer.txt](kommandoer.txt).
 | Drive the tendon motor | add `--motor` (optional `--motor-port COM5`) |
 | Use or write another calibration file | add `--calibration <file>` |
 | Calibrate again | add `--calibrate`, or press `c` in the window |
+| Change the 20 s wait before calibration and cues | add `--start-delay 5` |
 | Show cues and save them as labels | add `--out measurements --cues protocols\greb_1.csv` |
 | Use a trained GRU model instead of the signal processing | add `--method gru --model models\gru.pt` |
 
@@ -53,8 +54,9 @@ as an alternative and compared with it on the same controller: see
 
 ### Calibration
 
-The controller needs to know the rest and grip levels of the muscles: rest from 0.5 to 3 s,
-then hold a firm grip somewhere between 3.5 and 10 s. When the calibration succeeds the
+The controller needs to know the rest and grip levels of the muscles. A live run first waits
+`START_DELAY_S` (20 s, in `settings.py`) so the window has time to open; the status shows the
+countdown. Then: rest from 0.5 to 3 s, and hold a firm grip somewhere between 3.5 and 10 s. When the calibration succeeds the
 controller arms as soon as the hand has relaxed (the window shows "relax to arm"); if it
 fails, it says why and stays `DISARMED`.
 

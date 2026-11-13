@@ -32,6 +32,10 @@ TRIGNO_CONNECT_TIMEOUT_S = 3.0
 TRIGNO_COMMAND_TIMEOUT_S = 5.0  # the TCU takes about 2.6 s to answer STOP
 TRIGNO_DATA_TIMEOUT_S = 0.5  # no EMG data for this long: a message, then keep waiting
 
+# Live runs wait this long (seconds of EMG) before the calibration routine and the cues
+# begin: the window needs time to open, and the person time to get ready.
+START_DELAY_S = 20.0
+
 # --- Replay and live view -----------------------------------------------------------------
 BLOCK_SIZE = 27  # samples per block when replaying (one Trigno frame of 13.5 ms at 2000 Hz)
 MONITOR_SECONDS = 5.0  # seconds of EMG shown in the live view

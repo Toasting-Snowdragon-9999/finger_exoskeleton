@@ -4,7 +4,8 @@ The live pipeline: what happens to every block of EMG.
   Pipeline.step(block):
     1. filter it (SignalProcessor)
     2. keep the last few seconds for the viewer
-    3. calibrate, or compute the activation with the calibration
+    3. calibrate (after start_delay_s, if one is given), or compute the activation
+       with the calibration
     4. after calibration: arm the controller once the hand has relaxed
        (grasp <= GRASP_OFF for GRASP_OFF_TIME_S), so a grip still held at
        the end of the calibration does not count as a grasp
@@ -44,11 +45,12 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
 
     def __init__(self, channels: list[Channel], sample_rate: float,
                  calibration_file: Path | None = None, use_saved: bool = True,
-                 estimator: GRUEstimator | None = None) -> None:
+                 estimator: GRUEstimator | None = None, start_delay_s: float = 0.0) -> None:
         self.channels = channels
         self.names = [channel.name for channel in channels]
         self.sample_rate = sample_rate
         self.calibration_file = calibration_file
+        self.start_delay_s = start_delay_s  # the calibration routine waits this long first
         self.processor = SignalProcessor(len(channels), sample_rate)
         self.calibrator = Calibrator(self.names, sample_rate)
         self.controller = StiffnessController()
@@ -94,15 +96,28 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
         return self.controller.state
 
     @property
+    def stream_time(self) -> float:
+        """Seconds of EMG received so far: the clock of emg.csv, the cues and the labels."""
+        return self.samples_received / self.sample_rate
+
+    @property
+    def waiting_to_start(self) -> bool:
+        """True during the start delay before a calibration routine."""
+        return (self.calibration is None and not self.loaded_calibration
+                and self.stream_time < self.start_delay_s)
+
+    @property
     def phase(self) -> str:
         """What the user should be doing: the calibration phase, or "relax to arm"."""
+        if self.waiting_to_start:
+            return "waiting to start"
         return "relax to arm" if self.waiting_to_arm else self.calibrator.phase
 
     def message(self, text: str) -> None:
         """Print a message and keep it for the viewer and the session file."""
         print(text, flush=True)
         with self.lock:
-            self.messages.append((self.samples_received / self.sample_rate, text))
+            self.messages.append((self.stream_time, text))
 
     def recent(self) -> dict:
         """Copies of the last MONITOR_SECONDS of signals, for the viewer."""
@@ -156,8 +171,8 @@ class Pipeline:  # pylint: disable=too-many-instance-attributes
         if self.recalibrate_requested:
             self.recalibrate_requested = False
             self.restart_calibration()
-        if self.calibration is None:
-            self.calibrator.update(processed)
+        if self.calibration is None and not self.waiting_to_start:
+            self.calibrator.update(processed)  # its clock starts with the first block it gets
             self.check_calibration()
 
         now = (block.first_index + n) / self.sample_rate

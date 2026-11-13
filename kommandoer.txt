@@ -1,5 +1,7 @@
 KOMMANDOER (kør fra projektmappen i PowerShell)
 
+Start: live-kørsler venter 20 s (START_DELAY_S i settings.py), før kalibrering og cues begynder,
+så vinduet når at åbne. En gemt kalibrering (--calibration) bruges med det samme.
 Stop: tryk Ctrl+C EN gang og vent til prompten er tilbage (ca. 3 s), eller luk plotvinduet / tast q.
 Motor: fingeren skal stå åben før start. Tag 12 V-stikket ud, hvis noget går galt.
 Kalibreringen til den nuværende sensorplacering ligger i measurements\plac_calibration.json.

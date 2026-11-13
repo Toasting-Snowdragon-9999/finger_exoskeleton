@@ -82,17 +82,18 @@ def read_labels(path: Path, times: np.ndarray, margin_s: float) -> tuple[np.ndar
     return labels["intention"], labels["tremor"]
 
 
-def rest_level_of(emg: np.ndarray, sample_rate: float, percentile: float | None = None
-                  ) -> np.ndarray:
+def rest_level_of(emg: np.ndarray, sample_rate: float, percentile: float | None = None,
+                  start_s: float = 0.0) -> np.ndarray:
     """
     The rest level of every channel: the mean slow envelope in the calibration
-    rest window (as the live calibration), or with `percentile` that percentile
-    of the whole recording (for datasets without a calibration at the start).
+    rest window (as the live calibration; start_s = the recording's start delay),
+    or with `percentile` that percentile of the whole recording (for datasets
+    without a calibration at the start).
     """
     slow = SignalProcessor(emg.shape[0], sample_rate).process(EMGBlock(emg, 0, 0.0)).slow
     if percentile is not None:
         return np.percentile(slow, percentile, axis=1)
-    times = np.arange(emg.shape[1]) / sample_rate
+    times = np.arange(emg.shape[1]) / sample_rate - start_s
     rest = (times >= settings.REST_WINDOW_S[0]) & (times < settings.REST_WINDOW_S[1])
     return slow[:, rest].mean(axis=1)
 
@@ -116,7 +117,8 @@ def load_session(folder: Path, calibration_file: Path | None = None,
         rest_level = np.array([rest[name] for name in names])
         grip_level = np.array([grip[name] for name in names])
     else:
-        rest_level = rest_level_of(recording.emg, recording.sample_rate)
+        rest_level = rest_level_of(recording.emg, recording.sample_rate,
+                                   start_s=float(recording.metadata.get("start_delay_s", 0.0)))
 
     n = recording.emg.shape[1]
     intention, tremor = np.full(n, np.nan), np.full(n, np.nan)

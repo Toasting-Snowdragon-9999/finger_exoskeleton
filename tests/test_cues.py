@@ -41,3 +41,15 @@ def test_protocol_is_complete(path: Path, tmp_path: Path) -> None:
     known = ~np.isnan(intention)
     assert np.all(np.isnan(intention[times < 10])) and 0.6 < known.mean() < 0.8
     assert 0.35 < np.mean(intention[known] == 1) < 0.6 and np.nanmax(tremor) == 0
+
+
+def test_start_delay_shows_a_countdown_and_shifts_the_labels(tmp_path: Path) -> None:
+    """With a 20 s delay: a countdown first, then the same protocol 20 s later."""
+    protocol = CueProtocol(PROTOCOLS[0], start_s=20.0)
+    assert protocol.cue_at(0.0) == "VENT: starter om 20 s"
+    assert protocol.cue_at(18.2) == "VENT: starter om 2 s"
+    assert protocol.cue_at(21.0).startswith("KALIBRERING: hvil")
+    assert protocol.cue_at(35.0).startswith("GRIB")  # 14-18 s of the protocol
+    protocol.write_labels(tmp_path)
+    lines = (tmp_path / "labels.csv").read_text().splitlines()
+    assert lines[1] == "20,23,," and lines[4] == "34,38,1,0"

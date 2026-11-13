@@ -18,9 +18,13 @@ The protocol is a CSV file (see protocols/greb_1.csv; no commas in the cue text)
 `run_emg.py --cues <file> --out <folder>` shows the cues during the recording and
 writes them as labels.csv into the session folder. Times are seconds of EMG
 received, the same clock as time_s in emg.csv.
+
+With a start delay the whole protocol begins that much later: until then the
+cue is a countdown, and the times in labels.csv are shifted by the delay.
 """
 
 import csv
+import math
 from pathlib import Path
 
 LABELS_FILE = "labels.csv"
@@ -29,12 +33,16 @@ LABELS_FILE = "labels.csv"
 class CueProtocol:
     """The rows of a cue protocol file."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, start_s: float = 0.0) -> None:
+        self.start_s = start_s  # the protocol's time 0 is this many seconds into the recording
         with open(path, newline="", encoding="utf-8") as file:
             self.rows = list(csv.DictReader(file))
 
     def cue_at(self, time_s: float) -> str:
-        """What the person should do at this time ("" before the first row)."""
+        """What the person should do at this time of the recording."""
+        if time_s < self.start_s:
+            return f"VENT: starter om {math.ceil(self.start_s - time_s)} s"
+        time_s -= self.start_s
         for row in self.rows:
             if float(row["start_s"]) <= time_s < float(row["end_s"]):
                 return row["cue"]
@@ -48,4 +56,6 @@ class CueProtocol:
             writer = csv.writer(file)
             writer.writerow(["start_s", "end_s", "intention", "tremor"])
             for row in self.rows:
-                writer.writerow([row["start_s"], row["end_s"], row["intention"], row["tremor"]])
+                start = float(row["start_s"]) + self.start_s
+                end = float(row["end_s"]) + self.start_s
+                writer.writerow([f"{start:g}", f"{end:g}", row["intention"], row["tremor"]])
