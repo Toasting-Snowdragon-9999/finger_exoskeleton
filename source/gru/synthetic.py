@@ -16,7 +16,9 @@ from dataclasses import replace
 
 import numpy as np
 
+import settings
 from source.gru.labels import LabelledRecording, rest_level_of
+from source.signal_processing import EMGBlock, SignalProcessor
 
 RAMP_S = 0.3  # the tremor fades in and out over this long
 
@@ -75,7 +77,15 @@ def synthetic_recording(seed: int, roles: list[str], seconds: float = 60.0) -> L
         effort = np.maximum(-intention, 0) if role == "extensor" else np.maximum(intention, 0)
         amplitude.append(rest_mv + grip_mv * effort)
     emg = rng.standard_normal((len(roles), len(intention))) * np.array(amplitude)
+    # The grip level as the live calibration finds it; without grip (an extensor in this
+    # made-up data) it is set to 3 x rest so the DSP baseline has a usable scale
+    times = np.arange(len(intention)) / rate
+    grip = (times >= settings.GRIP_WINDOW_S[0]) & (times < settings.GRIP_WINDOW_S[1])
+    slow = SignalProcessor(len(roles), rate).process(EMGBlock(emg, 0, 0.0)).slow
+    rest_level = rest_level_of(emg, rate)
+    grip_level = np.maximum(np.percentile(slow[:, grip], settings.GRIP_PERCENTILE, axis=1),
+                            3 * rest_level)
     return LabelledRecording(
         name=f"synthetic-{seed}", group=f"synthetic-{seed}", emg=emg, sample_rate=rate,
-        roles=list(roles), rest_level=rest_level_of(emg, rate), intention=intention,
-        tremor=np.zeros(len(intention)), synthetic=True)
+        roles=list(roles), rest_level=rest_level, intention=intention,
+        tremor=np.zeros(len(intention)), synthetic=True, grip_level=grip_level)

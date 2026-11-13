@@ -23,7 +23,7 @@ addopts = "-ra"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["run_emg.py", "settings.py", "source", "tests"]
+files = ["run_emg.py", "train_gru.py", "evaluate_gru.py", "settings.py", "source", "tests"]
 # Every function has type hints, but plain ones (np.ndarray, dict) are fine
 disallow_untyped_defs = true
 explicit_package_bases = true
@@ -58,4 +58,5 @@ max-branches = 15
 disable = [
     "missing-module-docstring",
     "too-few-public-methods",
+    "duplicate-code",  # the two GRU scripts take the same options
 ]

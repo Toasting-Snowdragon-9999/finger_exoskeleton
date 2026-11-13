@@ -66,6 +66,7 @@ def test_one_sensor_model_uses_only_the_flexor_row() -> None:
         """Remembers the features it was given."""
 
         def step(self, frames: np.ndarray, hidden: object) -> tuple:
+            """Keep the frames, then answer as FakeModel."""
             seen.append(frames)
             return super().step(frames, hidden)
 

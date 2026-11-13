@@ -52,8 +52,10 @@ def test_rest_level_comes_from_the_calibration_that_was_used(tmp_path: Path) -> 
     writer = SessionWriter(tmp_path, settings.CHANNELS, 2000.0, "trigno", {})
     writer.write(EMGBlock(make_emg([(4.0, 0.01)]), 0, 0.0))
     writer.finish([], None, calibration={"channel_names": ["FDS", "EDC"],
-                                         "rest_slow": [0.5, 0.25]})
-    assert load_session(tmp_path).rest_level.tolist() == [0.5, 0.25]
+                                         "rest_slow": [0.5, 0.25], "reference_slow": [5, 4]})
+    stored = load_session(tmp_path)
+    assert stored.rest_level.tolist() == [0.5, 0.25]
+    assert stored.grip_level is not None and stored.grip_level.tolist() == [5, 4]
 
 
 def test_npz_dataset_is_resampled_and_keeps_its_labels(tmp_path: Path) -> None:
