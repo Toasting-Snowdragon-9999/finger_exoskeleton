@@ -1,0 +1,16 @@
+start_s,end_s,cue,intention,tremor
+0,3,KALIBRERING: hvil haanden,,
+3,10,KALIBRERING: fast greb og hold,,
+10,14,HVIL,0,0
+14,18,LUK HELT og hold,1,0
+18,22,HVIL,0,0
+22,26,LUK HALVT og hold,0.5,0
+26,30,HVIL,0,0
+30,34,AABN: straek fingrene og hold,-1,0
+34,38,HVIL,0,0
+38,42,LUK HELT og hold,1,0
+42,46,HVIL,0,0
+46,50,LUK HALVT og hold,0.5,0
+50,54,HVIL,0,0
+54,58,AABN: straek fingrene og hold,-1,0
+58,62,HVIL,0,0

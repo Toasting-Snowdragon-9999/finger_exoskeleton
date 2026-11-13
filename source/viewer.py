@@ -15,6 +15,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 
 import settings
+from source.cues import CueProtocol
 from source.pipeline import Acquisition, Pipeline
 
 STATE_COLORS = {"DISARMED": "gray", "IDLE": "green", "GRASP_ARMED": "orange", "STIFFENED": "red"}
@@ -60,9 +61,11 @@ def status_line(pipeline: Pipeline) -> str:
 class LiveViewer:
     """A matplotlib window; run() blocks until the window is closed or q is pressed."""
 
-    def __init__(self, pipeline: Pipeline, acquisition: Acquisition) -> None:
+    def __init__(self, pipeline: Pipeline, acquisition: Acquisition,
+                 protocol: CueProtocol | None = None) -> None:
         self.pipeline = pipeline
         self.acquisition = acquisition
+        self.protocol = protocol  # cues to show in big letters, or None
         n = len(pipeline.names)
         self.figure = plt.figure(figsize=(14, 2.5 * n + 3))
         grid = self.figure.add_gridspec(n + 1, 2, width_ratios=(3, 1), hspace=0.4)
@@ -115,6 +118,9 @@ class LiveViewer:
     def draw(self, _frame: int) -> None:
         """Copy the newest data into the plots."""
         pipeline = self.pipeline
+        if self.protocol is not None:
+            cue = self.protocol.cue_at(pipeline.samples_received / pipeline.sample_rate)
+            self.figure.suptitle(cue, fontsize=28, color="darkblue")
         recent = pipeline.recent()
         newest = last(recent["time"])
         seconds_ago = recent["time"] - newest

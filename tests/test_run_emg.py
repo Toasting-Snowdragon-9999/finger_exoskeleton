@@ -57,3 +57,26 @@ def test_gru_without_a_model_file_runs_on_the_signal_processing(
                          "--model", str(tmp_path / "none.pt")])
     assert code == 0
     assert "GRU not available" in capsys.readouterr().out
+
+
+def test_cues_are_shown_and_saved_as_labels(tmp_path: Path,
+                                            capsys: pytest.CaptureFixture[str]) -> None:
+    """--cues prints each cue when it starts and writes labels.csv into the session folder."""
+    protocol = tmp_path / "protocol.csv"
+    protocol.write_text("start_s,end_s,cue,intention,tremor\n"
+                        "0,0.6,HVIL,0,0\n0.6,5,LUK HELT,1,\n", encoding="utf-8")
+    code = run_emg.main(["--source", "recorded", "--file", str(RECORDING), "--headless",
+                         "--duration", "1.5", "--out", str(tmp_path / "out"),
+                         "--cues", str(protocol)])
+    assert code == 0
+    output = capsys.readouterr().out
+    assert output.index(">>> HVIL") < output.index(">>> LUK HELT")
+    (folder,) = (tmp_path / "out").iterdir()
+    labels = (folder / "labels.csv").read_text().splitlines()
+    assert labels == ["start_s,end_s,intention,tremor", "0,0.6,0,0", "0.6,5,1,"]
+
+
+def test_cues_need_a_recording() -> None:
+    """--cues without --out is refused: the labels would have nowhere to go."""
+    with pytest.raises(SystemExit):
+        run_emg.main(["--source", "recorded", "--file", str(RECORDING), "--cues", "x.csv"])

@@ -9,6 +9,8 @@ Examples (see kommandoer.txt for the bench commands):
   python run_emg.py --source trigno --mock-tcu                    a fake TCU, no hardware
   python run_emg.py --source recorded --file measurements/<session folder>   replay
   python run_emg.py --source trigno --method gru --model models/gru.pt   the GRU instead of DSP
+  python run_emg.py --source trigno --out measurements --cues protocols/greb_protokol.csv
+                                                    show cues and save them as labels.csv
   add --headless --duration 60 for status lines instead of a window
 
 --method dsp (the default) uses the signal processing; --method gru asks a trained
@@ -24,6 +26,7 @@ from typing import Any
 import numpy as np
 
 import settings
+from source.cues import CueProtocol
 from source.gru.inference import GRUEstimator, load_model
 from source.mock_tcu import MockTCU
 from source.motor import GraspSignal, MotorThread, connect_motor
@@ -60,11 +63,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              f"(default for live Trigno: {settings.CALIBRATION_FILE})")
     parser.add_argument("--calibrate", action="store_true",
                         help="calibrate now even if a saved calibration exists")
+    parser.add_argument("--cues", type=Path,
+                        help="with --out: a cue protocol (CSV) to show; saved as labels.csv")
     parser.add_argument("--method", choices=["dsp", "gru"], default="dsp",
                         help="dsp: signal processing (default); gru: a trained GRU model")
     parser.add_argument("--model", type=Path, default=Path(settings.GRU_MODEL_FILE),
                         help=f"with --method gru: the model (default {settings.GRU_MODEL_FILE})")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.cues is not None and args.out is None:
+        parser.error("--cues needs --out: the cues are saved as labels.csv with the recording")
+    return args
 
 
 def start_mock_tcu() -> MockTCU:
@@ -121,17 +129,27 @@ def start_source(args: argparse.Namespace) -> tuple[Source, MockTCU | None]:
     return source, mock
 
 
-def show_until_done(args: argparse.Namespace, pipeline: Pipeline, acquisition: Acquisition) -> None:
-    """The live window, or a status line every second with --headless."""
+def show_until_done(args: argparse.Namespace, pipeline: Pipeline, acquisition: Acquisition,
+                    protocol: CueProtocol | None) -> None:
+    """The live window, or a status line every second with --headless. Shows the cues."""
     if not args.headless:
         from source.viewer import LiveViewer  # pylint: disable=import-outside-toplevel
-        LiveViewer(pipeline, acquisition).run()
+        LiveViewer(pipeline, acquisition, protocol).run()
         return
     from source.viewer import status_line  # pylint: disable=import-outside-toplevel
     end = time.monotonic() + (args.duration if args.duration is not None else np.inf)
+    next_status = time.monotonic() + 1.0
+    shown_cue = ""
     while acquisition.running and time.monotonic() < end:
-        time.sleep(min(1.0, max(0.0, end - time.monotonic())))
-        print(status_line(pipeline), flush=True)
+        time.sleep(min(0.1, max(0.0, end - time.monotonic())))
+        if protocol is not None:
+            cue = protocol.cue_at(pipeline.samples_received / pipeline.sample_rate)
+            if cue != shown_cue:
+                shown_cue = cue
+                print(f">>> {cue}", flush=True)
+        if time.monotonic() >= next_status:
+            next_status += 1.0
+            print(status_line(pipeline), flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -160,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
                                 source.info(), args.label)
         print(f"Recording to {folder}")
 
+    protocol = CueProtocol(args.cues) if args.cues is not None else None
     acquisition = Acquisition(source, pipeline, session)
     acquisition.start()
     motors = motor_thread = None
@@ -168,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             motors, controller = connect_motor(args.motor_port)
             motor_thread = MotorThread(controller, GraspSignal(pipeline), pipeline.message)
             motor_thread.start()
-        show_until_done(args, pipeline, acquisition)
+        show_until_done(args, pipeline, acquisition, protocol)
     except KeyboardInterrupt:
         print("Interrupted")
     finally:
@@ -183,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         if session is not None:
             calibration = pipeline.calibration.to_dict() if pipeline.calibration else None
             session.finish(pipeline.messages, acquisition.error, calibration, args.method)
+            if protocol is not None:
+                protocol.write_labels(session.folder)
             print(f"Session saved to {session.folder}")
     return 1 if acquisition.error else 0
 
